@@ -66,7 +66,7 @@ function brillouinzone(g1, g2, N, half=true)
 end
 
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
-N = 100
+N = 50
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even 
 
@@ -97,7 +97,8 @@ function Hamiltonian(mean_fields,k,nn,K=[1,1,1])
     Calculates the Hamiltonian for a given wavevector as an 8x8 matrix
     This assumes only Kitaev coupling, no Heisenberg or Gamma terms 
     Requires:
-    - an 8x8x3 matrix of mean fields in real space <iX_aX_a^T>. The 3rd dimension specifies the direction of nearest neighbours alpha = x,y,z
+    - an 8x8x3 matrix of mean fields in real space <iX_aX_a^T>. 
+    The 3rd dimension specifies the direction of nearest neighbours alpha = x,y,z
     """
 
     M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
@@ -115,9 +116,32 @@ function Hamiltonian(mean_fields,k,nn,K=[1,1,1])
         end
         H = H -im*0.5*K[alpha]*Fourier(M[:,:,alpha,alpha],k,nn[alpha])
     end
-    display(M)
     return H 
 end
+
+function Hamiltonian_J(mean_fields,k,nn,J=1)
+    """
+    Given a set of mean fields as an 8x8x3 matrix calculates the Heisenberg term for the Hamiltonian 
+    as a function of wavevector k 
+    """
+    M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
+    H_J = zeros(Complex{Float64},8,8)
+    
+    for alpha = 1:3
+        for beta = 1:3
+            M[1,1+alpha,alpha,beta] = mean_fields[5,5+alpha,beta]
+            M[5,5+alpha,alpha,beta] = mean_fields[1,1+alpha,beta]
+            M[1,5,alpha,beta] = -mean_fields[1+alpha,5+alpha,beta]
+            M[1+alpha,5+alpha,alpha,beta] = -mean_fields[1,5,beta]
+            M[1,5+alpha,alpha,beta] = mean_fields[1+alpha,5,beta]
+            M[1+alpha,5,alpha,beta] = mean_fields[1,5+alpha,beta]
+            M[:,:,alpha,beta] = antisymmetrise(M[:,:,alpha,beta])
+
+            H_J += -0.5im*J*Fourier(M[:,:,alpha,beta],k,nn[beta])
+        end
+    end
+    return H_J
+end 
 
 function Fourier(M,k,neighbour_vector)
     """
