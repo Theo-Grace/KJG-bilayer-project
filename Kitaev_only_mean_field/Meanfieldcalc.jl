@@ -258,14 +258,14 @@ function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     return updated_mean_fields
 end
 
-function run_to_convergence(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1])
+function run_to_convergence(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
-    new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K)
+    new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
     difference = new_mean_fields-old_mean_fields
     it_num = 0 
     while filter(difference,tolerance) != zeros(Complex{Float64},8,8,3)
         old_mean_fields = new_mean_fields
-        new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K)
+        new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
         difference= new_mean_fields-old_mean_fields
         it_num +=1 
         println(it_num)
@@ -273,9 +273,9 @@ function run_to_convergence(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1])
     return round.(filter(new_mean_fields,tolerance),digits=trunc(Int,tolerance))
 end
 
-function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=[1,1,1])
+function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
-    new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K)
+    new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
     difference = new_mean_fields-old_mean_fields
     println(1)
     for step_num in 2:steps
@@ -292,7 +292,6 @@ function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=[1,
     display(difference)
     return new_mean_fields
 end
-
 
 
 # This section is used to calculate the analytical result for the mean fields to compare to numerical calculations. 
@@ -404,4 +403,14 @@ function plot_BZ(BZ)
     end
     scatter(kx,ky)
     scatter(g1[1],g1[2])
+end
+
+function converge_and_plot(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
+    """
+    Combines functions to allow you to calculate final fields and plot the bands at once 
+    """
+    final_mean_fields = run_to_convergence(BZ,initial_mean_fields,nn,tolerance,K,J,G)
+    bandstructure = get_bandstructure(BZ,final_mean_fields,nn,K,J,G)
+    plot_bands_G_to_K(BZ,bandstructure)
+    return final_mean_fields
 end
