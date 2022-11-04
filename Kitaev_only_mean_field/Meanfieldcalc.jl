@@ -101,22 +101,22 @@ function Hamiltonian(mean_fields,k,nn,K=[1,1,1])
     The 3rd dimension specifies the direction of nearest neighbours alpha = x,y,z
     """
 
-    M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
-    H = zeros(Complex{Float64},8,8)
+    M = zeros(Complex{Float64},8,8,3) # 3rd dimension specifies which majoranas are coupled and bond type 
+    H_K = zeros(Complex{Float64},8,8)
     
     for alpha = 1:3
-        for beta = 1:3
-            M[1,1+alpha,alpha,beta] = mean_fields[5,5+alpha,beta] # adds term associate to mean spin on site j <S_j>
-            M[5,5+alpha,alpha,beta] = mean_fields[1,1+alpha,beta] # adds term associated to mean spin on site i <S_i>
-            M[1,5,alpha,beta] = -mean_fields[1+alpha,5+alpha,beta] # adds term associated to gauge sector majoranas u^alpha_ij 
-            M[1+alpha,5+alpha,alpha,beta] = -mean_fields[1,5,beta] # adds term associated to matter sector majoranas u^0_ij
-            M[1,5+alpha,alpha,beta] = mean_fields[1+alpha,5,beta] # adds sector mixing term m'_ij
-            M[1+alpha,5,alpha,beta] = mean_fields[1,5+alpha,beta] # adds sector mixing term m _ij
-            M[:,:,alpha,beta] = antisymmetrise(M[:,:,alpha,beta])
-        end
-        H = H -im*0.5*K[alpha]*Fourier(M[:,:,alpha,alpha],k,nn[alpha])
+        M[1,1+alpha,alpha] = mean_fields[5,5+alpha,alpha] # adds term associate to mean spin on site j <S_j>
+        M[5,5+alpha,alpha] = mean_fields[1,1+alpha,alpha] # adds term associated to mean spin on site i <S_i>
+        M[1,5,alpha] = -mean_fields[1+alpha,5+alpha,alpha] # adds term associated to gauge sector majoranas u^alpha_ij 
+        M[1+alpha,5+alpha,alpha] = -mean_fields[1,5,alpha] # adds term associated to matter sector majoranas u^0_ij
+        M[1,5+alpha,alpha] = mean_fields[1+alpha,5,alpha] # adds majorana sector mixing term m'_ij
+        M[1+alpha,5,alpha] = mean_fields[1,5+alpha,alpha] # adds majorana sector mixing term m _ij
+
+        M[:,:,alpha] = antisymmetrise(M[:,:,alpha])
+        
+        H_K = H_K -im*0.5*K[alpha]*Fourier(M[:,:,alpha],k,nn[alpha])
     end
-    return H 
+    return H_K
 end
 
 function Hamiltonian_J(mean_fields,k,nn,J=1)
@@ -145,15 +145,28 @@ end
 
 function Hamiltonian_G(mean_fields,k,nn,G=1)
     """
+    Given a set of mean fields as an 8x8x3 matrix calculates the Gamma term for the Hamiltonian 
+    as a function of wavevector k
     """
     M_G = zeros(Complex{Float64},8,8,3)
     H_G = zeros(Complex{Float64},8,8)
 
     for alpha = 1:3
         for beta = setdiff([1,2,3],alpha)
-            M_G[1,1+beta,alpha] = mean_fields[,,alpha]
+            gamma = setdiff([1,2,3],[alpha,beta])[1]
+
+            M_G[5,5+beta,alpha] = mean_fields[1,1+gamma,alpha] # adds terms associated with <S_i>
+            M_G[1,1+beta,alpha] = mean_fields[5,5+gamma,alpha] # adds terms associated with <S_j>
+            M_G[1,5,alpha] = -mean_fields[1+beta,1+gamma,alpha] # adds terms mixing gauge majoranas <iX^bX^c>
+            M_G[1+beta,5+gamma,alpha] = mean_fields[1,5,alpha] # adds terms u^0_ij 
+            M_G[1,5+beta,alpha] = mean_fields[1+gamma,5,alpha] # adds sector mixing terms m'_ij
+            M_G[1+beta,5,alpha] = mean_fields[1,1+gamma,alpha] # adds sector mixing terms m_ij
         end
+        M_G[:,:,alpha] = antisymmetrise(M_G[:,:,alpha])
+
+        H_G += 0.5im*G*Fourier(M_G[:,:,alpha],k,nn[alpha])
     end
+    return H_G
 end
 
 function Fourier(M,k,neighbour_vector)
