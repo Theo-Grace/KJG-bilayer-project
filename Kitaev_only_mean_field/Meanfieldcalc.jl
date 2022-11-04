@@ -106,12 +106,12 @@ function Hamiltonian(mean_fields,k,nn,K=[1,1,1])
     
     for alpha = 1:3
         for beta = 1:3
-            M[1,1+alpha,alpha,beta] = mean_fields[5,5+alpha,beta]
-            M[5,5+alpha,alpha,beta] = mean_fields[1,1+alpha,beta]
-            M[1,5,alpha,beta] = -mean_fields[1+alpha,5+alpha,beta]
-            M[1+alpha,5+alpha,alpha,beta] = -mean_fields[1,5,beta]
-            M[1,5+alpha,alpha,beta] = mean_fields[1+alpha,5,beta]
-            M[1+alpha,5,alpha,beta] = mean_fields[1,5+alpha,beta]
+            M[1,1+alpha,alpha,beta] = mean_fields[5,5+alpha,beta] # adds term associate to mean spin on site j <S_j>
+            M[5,5+alpha,alpha,beta] = mean_fields[1,1+alpha,beta] # adds term associated to mean spin on site i <S_i>
+            M[1,5,alpha,beta] = -mean_fields[1+alpha,5+alpha,beta] # adds term associated to gauge sector majoranas u^alpha_ij 
+            M[1+alpha,5+alpha,alpha,beta] = -mean_fields[1,5,beta] # adds term associated to matter sector majoranas u^0_ij
+            M[1,5+alpha,alpha,beta] = mean_fields[1+alpha,5,beta] # adds sector mixing term m'_ij
+            M[1+alpha,5,alpha,beta] = mean_fields[1,5+alpha,beta] # adds sector mixing term m _ij
             M[:,:,alpha,beta] = antisymmetrise(M[:,:,alpha,beta])
         end
         H = H -im*0.5*K[alpha]*Fourier(M[:,:,alpha,alpha],k,nn[alpha])
@@ -142,6 +142,19 @@ function Hamiltonian_J(mean_fields,k,nn,J=1)
     end
     return H_J
 end 
+
+function Hamiltonian_G(mean_fields,k,nn,G=1)
+    """
+    """
+    M_G = zeros(Complex{Float64},8,8,3)
+    H_G = zeros(Complex{Float64},8,8)
+
+    for alpha = 1:3
+        for beta = setdiff([1,2,3],alpha)
+            M_G[1,1+beta,alpha] = mean_fields[,,alpha]
+        end
+    end
+end
 
 function Fourier(M,k,neighbour_vector)
     """
