@@ -12,8 +12,10 @@ nz = -(2a1 + a2)/3
 
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector 
 
-# sets the Kitaev coupling parameters
+# sets the coupling parameters
 K = [1,1,1]
+J = 0
+G = 0
 
 function antisymmetrise(A)
     """
@@ -92,7 +94,7 @@ function initial_guess_mean_fields(uC=-1,uK=1,uJ=0)
     return mean_fields
 end
 
-function Hamiltonian(mean_fields,k,nn,K=[1,1,1])
+function Hamiltonian_K(mean_fields,k,nn,K=[1,1,1])
     """
     Calculates the Hamiltonian for a given wavevector as an 8x8 matrix
     This assumes only Kitaev coupling, no Heisenberg or Gamma terms 
@@ -169,6 +171,20 @@ function Hamiltonian_G(mean_fields,k,nn,G=1)
     return H_G
 end
 
+function Hamiltonian_full(mean_fields,k,nn,K=[1,1,1],J=0,G=0)
+    """
+    Calculates the full Hamiltonian by adding seperate terms
+    """
+    H = Hamiltonian_K(mean_fields,k,nn,K)
+    if J != 0 
+        H += Hamiltonian_J(mean_fields,k,nn,J)
+    end
+    if G != 0 
+        H += Hamiltonian_G(mean_fields,k,nn,G)
+    end 
+    return H
+end    
+
 function Fourier(M,k,neighbour_vector)
     """
     Given an 8x8 matrix M this returns the matrix with off diagonal 4x4 blocks multiplied by phase factors e^ik.n
@@ -216,11 +232,15 @@ function filter(M,tolerance=14.0)
     return real_filtered_M + im*imag_filtered_M
 end
 
-function update_mean_fields(BZ,old_mean_fields,nn,K)
+function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     """
-    calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields, then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
+    calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
+    then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
     Requires:
+    - Brillouin zone as a matrix of k vectors
     - a current mean field 8x8x3 matrix 
+    - nearest neighbour vectors nn 
+    - Coupling parameters K, J, G (default is isotropic K and J=G=0)
     returns
     - a new mean field 8x8x3 matrix
     """
@@ -228,7 +248,7 @@ function update_mean_fields(BZ,old_mean_fields,nn,K)
     updated_mean_fields = zeros(Complex{Float64},8,8,3)
     for alpha in 1:3
         for k in BZ
-            H = Hamiltonian(old_mean_fields,k,nn,K)
+            H = Hamiltonian_full(old_mean_fields,k,nn,K,J,G)
             U , occupancymatrix = diagonalise(H)
             updated_mean_fields[:,:,alpha] += Fourier(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
         end
@@ -297,20 +317,22 @@ end
 
 # This section calculates the bandstructure given a set of mean fields by calculating the eigenvalues of the corresponding Hamiltonian for each wavevector.
 # These functions can be used to plot interesting directions in the brillouin zone 
-function get_bandstructure(BZ,mean_fields,nn,K=[1,1,1])
+function get_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0)
     """
     takes:
     - The BZ as a matrix of k vectors
     - an 8x8x3 matrix of mean fields mean_fields 
     - nearest neighbour vectors in a vector nn
-    - Kitaev coupling parameters K
+    - Kitaev coupling parameters as a vector K
+    - Heisenberg coupling J as a scalar
+    - Gamma coupling G as a scalar 
     returns:
     - A dictionary called bandstructure with a key for each k in the Brillouin zone whose entries are a vector
     containing the energies for that k 
     """
     bandstructure = Dict()
     for k in BZ 
-        H = Hamiltonian(mean_fields,k,nn,K)
+        H = Hamiltonian_full(mean_fields,k,nn,K,J,G)
         bandstructure[k] = eigvals(H)
     end
     return bandstructure
