@@ -100,6 +100,25 @@ function initial_guess_mean_fields(uC=-1,uK=1,uJ=0,random=0)
     return mean_fields
 end
 
+function initial_guess_bilayer_mean_fields(uC=-1,uK=1,uJ=0,u0Perp=0.025,uPerp=0.025,random=0)
+    """
+    Returns a 16x16x3 matrix of mean fields in which only terms which are expected to be non zero are included. 
+    """
+    Mean_fields = zeros(16,16,3)
+    Mean_fields[1:8,1:8,:] = initial_guess_mean_fields(uC,uK,uJ,random)
+    Mean_fields[9:16,9:16,:] = Mean_fields[1:8,1:8,:]
+    for alpha = 1:3
+        for l = [0,4]
+            for beta =  1:3
+                Mean_fields[1+l,9+l,alpha] = u0Perp
+                Mean_fields[1+l+beta,9+l+beta,alpha] = uPerp
+            end
+        end
+        Mean_fields[:,:,alpha] = antisymmetrise(Mean_fields[:,:,alpha])
+    end
+    return Mean_fields
+end
+
 function Hamiltonian_K(mean_fields,k,nn,K=[1,1,1])
     """
     Calculates the Hamiltonian for a given wavevector as an 8x8 matrix
@@ -444,4 +463,15 @@ function Hamiltonian_interlayer(Mean_fields,J_perp)
     H_perp = antisymmetrise(H_perp)
 
     return 0.5*im*J_perp*H_perp
+end
+
+function Hamiltonian_intralayer(Mean_fields,k,nn,K=[1,1,1],J=0,G=0)
+    """
+    Calculates the Intralayer Hamiltonian for the bilayer model.
+    Returns a 16x16 matrix with 8x8 blocks along the diagonal given by the monolayer Hamiltonian 
+    """
+    H_intra = zeros(16,16)
+    H_intra[1:8,1:8] = Hamiltonian_full(Mean_fields[1:8,1:8,:],k,nn,K,J,G)
+    H_intra[9:16,9:16] = Hamiltonian_full(Mean_fields[9:16,9:16,:],k,nn,K,J,G)
+    return H_intra 
 end
