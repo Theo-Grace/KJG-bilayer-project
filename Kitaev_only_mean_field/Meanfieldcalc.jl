@@ -253,7 +253,7 @@ function filter(M,tolerance=14.0)
     return real_filtered_M + im*imag_filtered_M
 end
 
-function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
+function update_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     """
     calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
     then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
@@ -265,13 +265,14 @@ function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     returns
     - a new mean field 8x8x3 matrix
     """
-    Num_unit_cells = length(BZ)
+    Num_unit_cells = 2*length(half_BZ)
     updated_mean_fields = zeros(Complex{Float64},8,8,3)
-    for k in BZ
+    for k in half_BZ
         H = Hamiltonian_full(old_mean_fields,k,nn,K,J,G)
         U , occupancymatrix = diagonalise(H)
         for alpha = 1:3
             updated_mean_fields[:,:,alpha] += Fourier(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
+            updated_mean_fields[:,:,alpha] -= Fourier(U*occupancymatrix*U',-k,nn[alpha])
         end
     end
 
@@ -280,14 +281,14 @@ function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     return updated_mean_fields
 end
 
-function run_to_convergence(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
+function run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
-    new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
+    new_mean_fields = update_mean_fields(half_BZ,old_mean_fields,nn,K,J,G)
     difference = new_mean_fields-old_mean_fields
     it_num = 0 
     while filter(difference,tolerance) != zeros(Complex{Float64},8,8,3)
         old_mean_fields = new_mean_fields
-        new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
+        new_mean_fields = update_mean_fields(half_BZ,old_mean_fields,nn,K,J,G)
         difference= new_mean_fields-old_mean_fields
         it_num +=1 
         println(it_num)
