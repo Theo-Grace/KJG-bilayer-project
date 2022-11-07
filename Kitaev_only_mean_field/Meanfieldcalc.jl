@@ -267,13 +267,14 @@ function update_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     """
     Num_unit_cells = length(BZ)
     updated_mean_fields = zeros(Complex{Float64},8,8,3)
-    for alpha in 1:3
-        for k in BZ
-            H = Hamiltonian_full(old_mean_fields,k,nn,K,J,G)
-            U , occupancymatrix = diagonalise(H)
+    for k in BZ
+        H = Hamiltonian_full(old_mean_fields,k,nn,K,J,G)
+        U , occupancymatrix = diagonalise(H)
+        for alpha = 1:3
             updated_mean_fields[:,:,alpha] += Fourier(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
         end
     end
+
     updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
 
     return updated_mean_fields
