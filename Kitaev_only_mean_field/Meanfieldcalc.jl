@@ -283,14 +283,16 @@ end
 
 function run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
-    new_mean_fields = update_mean_fields(half_BZ,old_mean_fields,nn,K,J,G)
-    difference = new_mean_fields-old_mean_fields
+    new_mean_fields = zeros(8,8,3)
+    tol = 10^(-tolerance)
     it_num = 0 
-    while filter(difference,tolerance) != zeros(Complex{Float64},8,8,3)
-        old_mean_fields = new_mean_fields
+    not_converged = true
+    while not_converged
         new_mean_fields = update_mean_fields(half_BZ,old_mean_fields,nn,K,J,G)
-        difference= new_mean_fields-old_mean_fields
+        diff= abs.(real.(new_mean_fields-old_mean_fields))
+        not_converged = any(diff .> tol)
         it_num +=1 
+        old_mean_fields = new_mean_fields
         println(it_num)
     end
     return round.(filter(new_mean_fields,tolerance),digits=trunc(Int,tolerance))
@@ -500,7 +502,7 @@ function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0
         U , occupancymatrix = diagonalise(H)
         for alpha = 1:3
             updated_mean_fields[:,:,alpha] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
-            updated_mean_fields[:,:,alpha] += Fourier_bilayer(U*occupancymatrix*U',-k,nn[alpha])
+            updated_mean_fields[:,:,alpha] -= Fourier_bilayer(U*occupancymatrix*U',-k,nn[alpha])
         end
     end
 
