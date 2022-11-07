@@ -71,23 +71,19 @@ end
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
 N = 24
 g1, g2 = dual(a1,a2)
-BZ = brillouinzone(g1,g2,N,false) # N must be even 
+BZ = brillouinzone(g1,g2,N,false) # N must be even
+half_BZ = brillouinzone(g1,g2,N,true)
 
 function initial_guess_mean_fields(uC=-1,uK=1,uJ=0,random=0)
     mean_fields = zeros(8,8,3)
 
-    mean_fields[1,5,1] = uC
-    mean_fields[1,5,2] = uC 
-    mean_fields[1,5,3] = uC 
-    mean_fields[2,6,1] = uK
-    mean_fields[3,7,2] = uK
-    mean_fields[4,8,3] = uK
-    mean_fields[2,6,2] = uJ
-    mean_fields[2,6,3] = uJ
-    mean_fields[3,7,1] = uJ
-    mean_fields[3,7,3] = uJ
-    mean_fields[4,8,1] = uJ
-    mean_fields[4,8,2] = uJ
+    for alpha = 1:3
+        mean_fields[1,5,alpha]=uC
+        mean_fields[1+alpha,5+alpha,alpha]=uK
+        beta = setdiff([1,2,3],alpha)
+        mean_fields[1+alpha,5+alpha,beta[1]] = uJ
+        mean_fields[1+alpha,5+alpha,beta[2]] = uJ
+    end
 
     if random != 0 
         mean_fields += random*rand(8,8,3)
@@ -480,7 +476,7 @@ function Hamiltonian_intralayer(Mean_fields,k,nn,K=[1,1,1],J=0,G=0)
     return H_intra 
 end
 
-function update_bilayer_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
     """
     calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
     then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
@@ -492,17 +488,20 @@ function update_bilayer_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0,J_pe
     returns
     - a new mean field 16x16x3 matrix
     """
-    Num_unit_cells = length(BZ)
+    Num_unit_cells = 2*length(half_BZ)
     updated_mean_fields = zeros(Complex{Float64},16,16,3)
     H_inter = Hamiltonian_interlayer(old_mean_fields,J_perp)
     display(H_inter)
-    for alpha in 1:3
-        for k in BZ
-            H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
-            U , occupancymatrix = diagonalise(H)
+    
+    for k in half_BZ
+        H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
+        U , occupancymatrix = diagonalise(H)
+        for alpha = 1:3
             updated_mean_fields[:,:,alpha] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
+            updated_mean_fields[:,:,alpha] += Fourier_bilayer(U*occupancymatrix*U',-k,nn[alpha])
         end
     end
+
     updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
 
     return updated_mean_fields
