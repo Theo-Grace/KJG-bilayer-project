@@ -227,7 +227,7 @@ function fermi_dirac(E,temp=0.0,mu=0)
     return (exp((E-mu)/temp) + 1)^-1
 end
 
-function diagonalise(H)
+function diagonalise(H,temp=0.0,mu=0)
     """
     Diagonalises the Hamiltonian H
     returns:
@@ -236,7 +236,7 @@ function diagonalise(H)
     """
     U = eigvecs(H)
     E = eigvals(H)
-    O =  Diagonal(fermi_dirac.(E))
+    O =  Diagonal(fermi_dirac.(E,temp,mu))
     return U , O 
 end
 
@@ -446,6 +446,10 @@ end
 # This section adds functions to treat the bilayer model 
 
 function Hamiltonian_interlayer(Mean_fields,J_perp)
+    """
+    Calculates the Interlayer Hamiltonian assuming AA stacking and Heisenberg coupling between sites directly next to each other in the layers. 
+    Returns a 16x16 matrix 
+    """
     H_perp = zeros(16,16)
     for alpha = 1:3
         for j = [0,4]
@@ -470,8 +474,46 @@ function Hamiltonian_intralayer(Mean_fields,k,nn,K=[1,1,1],J=0,G=0)
     Calculates the Intralayer Hamiltonian for the bilayer model.
     Returns a 16x16 matrix with 8x8 blocks along the diagonal given by the monolayer Hamiltonian 
     """
-    H_intra = zeros(16,16)
+    H_intra = zeros(Complex{Float64},16,16)
     H_intra[1:8,1:8] = Hamiltonian_full(Mean_fields[1:8,1:8,:],k,nn,K,J,G)
     H_intra[9:16,9:16] = Hamiltonian_full(Mean_fields[9:16,9:16,:],k,nn,K,J,G)
     return H_intra 
+end
+
+function update_bilayer_mean_fields(BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+    """
+    calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
+    then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
+    Requires:
+    - Brillouin zone as a matrix of k vectors
+    - a current mean field 16x16x3 matrix 
+    - nearest neighbour vectors nn 
+    - Coupling parameters K, J, G, J_perp (default is isotropic K and J=G=0)
+    returns
+    - a new mean field 16x16x3 matrix
+    """
+    Num_unit_cells = length(BZ)
+    updated_mean_fields = zeros(Complex{Float64},16,16,3)
+    H_inter = Hamiltonian_interlayer(old_mean_fields,J_perp)
+    display(H_inter)
+    for alpha in 1:3
+        for k in BZ
+            H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
+            U , occupancymatrix = diagonalise(H)
+            updated_mean_fields[:,:,alpha] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
+        end
+    end
+    updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
+
+    return updated_mean_fields
+end
+
+function Fourier_bilayer(M,k,neighbour_vector)
+    """
+    Given an 16x16 matrix M 
+    This implements a Fourier transform from mean fields in real space to momentum space
+    """
+    phase = exp(im*dot(k,neighbour_vector))
+    F = Diagonal([1,1,1,1,phase,phase,phase,phase,1,1,1,1,phase,phase,phase,phase])
+    return (F')*M*F
 end
