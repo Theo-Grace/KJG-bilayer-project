@@ -421,3 +421,33 @@ function converge_and_plot(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=
     plot_bands_G_to_K(BZ,bandstructure)
     return final_mean_fields
 end
+
+
+
+# This section adds functions to treat the bilayer model 
+
+function Hamiltonian_interlayer(Mean_fields,J_perp)
+    H_perp = zeros(16,16)
+    for alpha = 1:3
+        for j = [0,4]
+            H_perp[1+j,1+j+alpha] = Mean_fields[9+j,9+j+alpha,1] # Adds term associated to mean spin <S_2A^alpha>
+            #M[5,5+alpha] = Mean_fields[13,13+alpha] # Adds term associated to mean spin <S_2B^alpha>
+            H_perp[9+j,9+j+alpha] = Mean_fields[1+j,1+j+alpha,1] # Adds term associated to mean spin <S_1A^alpha>
+            #M[13,13+alpha] = Mean_fields[5,5+alpha] # Adds term associated to mean spin <S_1B^alpha>
+
+            H_perp[1+j,9+j] += -Mean_fields[1+j+alpha,9+j+alpha,1]
+            H_perp[1+j,9+j+alpha] = Mean_fields[1+j+alpha,9+j,1]
+            H_perp[1+j+alpha,9+j] = Mean_fields[1+j,9+j+alpha,1]
+            H_perp[1+j+alpha,9+j+alpha] = -Mean_fields[1+j,9+j,1]
+
+            #M[5,13] = -Mean_fields[5+alpha,13+alpha]
+            #M[5,13+alpha] = Mean_fields[5+alpha,13]
+            #M[5+alpha,13] = Mean_fields[5,13+alpha]
+            #M[5+alpha,13+alpha] = -Mean_fields[5,13]
+        end 
+    end
+
+    H_perp = antisymmetrise(H_perp)
+
+    return 0.5*im*J_perp*H_perp
+end
