@@ -2,10 +2,11 @@ using LinearAlgebra
 using PyPlot # This is the library used for plotting 
 pygui(true) # This changes the plot backend from julia default to allow plots to be displayed
 
-#This sets the real space lattice vectors
+# sets the real space lattice vectors
 a1 = [1/2, sqrt(3)/2]
 a2 = [1/2, -sqrt(3)/2]
 
+# sets the nearest neighbour vectors 
 nx = (a1 - a2)/3
 ny = (a1 + 2a2)/3
 nz = -(2a1 + a2)/3
@@ -68,11 +69,11 @@ function brillouinzone(g1, g2, N, half=true)
 end
 
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
-N = 50
+N = 24
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even 
 
-function initial_guess_mean_fields(uC=-1,uK=1,uJ=0)
+function initial_guess_mean_fields(uC=-1,uK=1,uJ=0,random=0)
     mean_fields = zeros(8,8,3)
 
     mean_fields[1,5,1] = uC
@@ -87,6 +88,11 @@ function initial_guess_mean_fields(uC=-1,uK=1,uJ=0)
     mean_fields[3,7,3] = uJ
     mean_fields[4,8,1] = uJ
     mean_fields[4,8,2] = uJ
+
+    if random != 0 
+        mean_fields += random*rand(8,8,3)
+    end
+
     for n = 1:3
         mean_fields[:,:,n] = antisymmetrise(mean_fields[:,:,n])
     end
@@ -173,7 +179,7 @@ end
 
 function Hamiltonian_full(mean_fields,k,nn,K=[1,1,1],J=0,G=0)
     """
-    Calculates the full Hamiltonian by adding seperate terms
+    Calculates the full monolayer Hamiltonian by adding seperate terms
     """
     H = Hamiltonian_K(mean_fields,k,nn,K)
     if J != 0 
@@ -294,7 +300,7 @@ function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=[1,
 end
 
 
-# This section is used to calculate the analytical result for the mean fields to compare to numerical calculations. 
+# This section is used to calculate the analytical result (from Siefert's paper) for the mean fields to compare to numerical calculations. 
 function phi(k,nn)
     p = 0
     for alpha = 1:3
@@ -408,6 +414,7 @@ end
 function converge_and_plot(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
     """
     Combines functions to allow you to calculate final fields and plot the bands at once 
+    returns the converged mean fields 
     """
     final_mean_fields = run_to_convergence(BZ,initial_mean_fields,nn,tolerance,K,J,G)
     bandstructure = get_bandstructure(BZ,final_mean_fields,nn,K,J,G)
