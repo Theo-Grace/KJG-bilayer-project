@@ -163,7 +163,7 @@ function Hamiltonian_G(mean_fields,k,nn,G=1)
             M_G[1,5,alpha] = -mean_fields[1+beta,1+gamma,alpha] # adds terms mixing gauge majoranas <iX^bX^c>
             M_G[1+beta,5+gamma,alpha] = -mean_fields[1,5,alpha] # adds terms u^0_ij 
             M_G[1,5+beta,alpha] = mean_fields[1+gamma,5,alpha] # adds sector mixing terms m'_ij
-            M_G[1+beta,5,alpha] = mean_fields[1,1+gamma,alpha] # adds sector mixing terms m_ij
+            M_G[1+beta,5,alpha] = mean_fields[1,5+gamma,alpha] # adds sector mixing terms m_ij
         end
         M_G[:,:,alpha] = antisymmetrise(M_G[:,:,alpha])
 
@@ -185,6 +185,40 @@ function Hamiltonian_full(mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
     end 
     return H
 end    
+
+function Hamiltonian_combined(mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
+    """
+    Calculates the full monolayer Hamiltonian including K J and G terms, but uses only one loop rather than calling seperate functions to calculate terms individually.
+    """
+    M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
+    M_G = zeros(Complex{Float64},8,8,3)
+
+    for alpha = 1:3
+        for beta = 1:3
+            M[1,1+beta,beta,alpha] = mean_fields[5,5+beta,alpha]
+            M[5,5+beta,beta,alpha] = mean_fields[1,1+beta,alpha]
+            M[1,5,beta,alpha] = -mean_fields[1+beta,5+beta,alpha]
+            M[1+beta,5+beta,beta,alpha] = -mean_fields[1,5,alpha]
+            M[1,5+beta,beta,alpha] = mean_fields[1+beta,5,alpha]
+            M[1+beta,5,beta,alpha] = mean_fields[1,5+beta,alpha]
+            M[:,:,beta,alpha] = antisymmetrise(M[:,:,beta,alpha])
+        end
+
+        for beta = setdiff([1,2,3],alpha)
+            gamma = setdiff([1,2,3],[alpha,beta])[1]
+
+            M_G[5,5+beta,alpha] = mean_fields[1,1+gamma,alpha] # adds terms associated with <S_i>
+            M_G[1,1+beta,alpha] = mean_fields[5,5+gamma,alpha] # adds terms associated with <S_j>
+            M_G[1,5,alpha] = -mean_fields[1+beta,1+gamma,alpha] # adds terms mixing gauge majoranas <iX^bX^c>
+            M_G[1+beta,5+gamma,alpha] = mean_fields[1,5,alpha] # adds terms u^0_ij 
+            M_G[1,5+beta,alpha] = mean_fields[1+gamma,5,alpha] # adds sector mixing terms m'_ij
+            M_G[1+beta,5,alpha] = mean_fields[1,5+gamma,alpha] # adds sector mixing terms m_ij
+        end
+        M_G[:,:,alpha] = antisymmetrise(M_G[:,:,alpha])
+
+    end
+
+end     
 
 function Fourier(M,k,neighbour_vector)
     """
