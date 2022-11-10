@@ -69,7 +69,7 @@ function brillouinzone(g1, g2, N, half=true)
 end
 
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
-N = 24
+N = 100
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
@@ -94,25 +94,6 @@ function initial_guess_mean_fields(uC=-1,uK=1,uJ=0,random=0)
     end
 
     return mean_fields
-end
-
-function initial_guess_bilayer_mean_fields(uC=-1,uK=1,uJ=0,u0Perp=0.025,uPerp=0.025,random=0)
-    """
-    Returns a 16x16x3 matrix of mean fields in which only terms which are expected to be non zero are included. 
-    """
-    Mean_fields = zeros(16,16,3)
-    Mean_fields[1:8,1:8,:] = initial_guess_mean_fields(uC,uK,uJ,random)
-    Mean_fields[9:16,9:16,:] = Mean_fields[1:8,1:8,:]
-    for alpha = 1:3
-        for l = [0,4]
-            for beta =  1:3
-                Mean_fields[1+l,9+l,alpha] = u0Perp
-                Mean_fields[1+l+beta,9+l+beta,alpha] = uPerp
-            end
-        end
-        Mean_fields[:,:,alpha] = antisymmetrise(Mean_fields[:,:,alpha])
-    end
-    return Mean_fields
 end
 
 function Hamiltonian_K(mean_fields,k,nn,K=[1,1,1])
@@ -362,25 +343,32 @@ function get_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0)
     return bandstructure
 end
 
-function plot_bands_G_to_K(BZ,bandstructure)
+function plot_bands_G_to_K(BZ,bandstructure,bilayer=false)
     """
     This plots the bands along the direction between Gamma and M points in the Brillouin Zone
     This requires:
     - the bandstructure as a dictionary bandstructure[k] whose entries are the 8 energies for that k vector
     - the Brillouin zone BZ as a matrix of k vectors 
+    - a boolean argument bilayer which determines whether there are 16 or 8 bands to plot 
     """
+    if bilayer == false
+        num_majoranas = 8
+    else
+        num_majoranas = 16
+    end
+
     GtoK = []
-    bands_GtoK = [[] for i = 1:8]
+    bands_GtoK = [[] for i = 1:num_majoranas]
     for k in BZ 
         if (k[2] == 0) 
             push!(GtoK,k)
-            for i in 1:8
+            for i in 1:num_majoranas
                 push!(bands_GtoK[i],bandstructure[k][i])
             end
         end 
     end 
     kGtoK = (1:length(GtoK))*(g1[1]+g2[1])/(2*length(GtoK))
-    for i in 1:8
+    for i in 1:num_majoranas
         plot(kGtoK,bands_GtoK[i])
     end
     title("Majorana bandstructure between \$\\Gamma\$ and \$ K \$ points")
@@ -445,6 +433,25 @@ end
 
 # This section adds functions to treat the bilayer model 
 
+function initial_guess_bilayer_mean_fields(uC=-1,uK=1,uJ=0,u0Perp=0.0,uPerp=0.0,random=0)
+    """
+    Returns a 16x16x3 matrix of mean fields in which only terms which are expected to be non zero are included. 
+    """
+    Mean_fields = zeros(16,16,3)
+    Mean_fields[1:8,1:8,:] = initial_guess_mean_fields(uC,uK,uJ,random)
+    Mean_fields[9:16,9:16,:] = Mean_fields[1:8,1:8,:]
+    for alpha = 1:3
+        for l = [0,4]
+            for beta =  1:3
+                Mean_fields[1+l,9+l,alpha] = u0Perp
+                Mean_fields[1+l+beta,9+l+beta,alpha] = uPerp
+            end
+        end
+        Mean_fields[:,:,alpha] = antisymmetrise(Mean_fields[:,:,alpha])
+    end
+    return Mean_fields
+end
+
 function Hamiltonian_interlayer(Mean_fields,J_perp)
     """
     Calculates the Interlayer Hamiltonian assuming AA stacking and Heisenberg coupling between sites directly next to each other in the layers. 
@@ -495,8 +502,7 @@ function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0
     Num_unit_cells = 2*length(half_BZ)
     updated_mean_fields = zeros(Complex{Float64},16,16,3)
     H_inter = Hamiltonian_interlayer(old_mean_fields,J_perp)
-    display(H_inter)
-    
+
     for k in half_BZ
         H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
         U , occupancymatrix = diagonalise(H)
@@ -519,4 +525,50 @@ function Fourier_bilayer(M,k,neighbour_vector)
     phase = exp(im*dot(k,neighbour_vector))
     F = Diagonal([1,1,1,1,phase,phase,phase,phase,1,1,1,1,phase,phase,phase,phase])
     return (F')*M*F
+end
+
+function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0,J_perp=0)
+    old_mean_fields = initial_mean_fields
+    new_mean_fields = zeros(16,16,3)
+    tol = 10^(-tolerance)
+    it_num = 0 
+    not_converged = true
+    while not_converged
+        new_mean_fields = update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K,J,G,J_perp)
+        diff= abs.(real.(new_mean_fields-old_mean_fields))
+        not_converged = any(diff .> tol)
+        it_num +=1 
+        old_mean_fields = new_mean_fields
+        println(it_num)
+    end
+    return round.(filter(new_mean_fields,tolerance),digits=trunc(Int,tolerance))
+end
+
+function get_bilayer_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+    """
+    takes:
+    - The BZ as a matrix of k vectors
+    - an 16x16x3 matrix of mean fields mean_fields 
+    - nearest neighbour vectors in a vector nn
+    - Kitaev coupling parameters as a vector K
+    - Heisenberg coupling J as a scalar
+    - Gamma coupling G as a scalar 
+    returns:
+    - A dictionary called bandstructure with a key for each k in the Brillouin zone whose entries are a vector
+    containing the energies for that k 
+    """
+    bandstructure = Dict()
+    H_inter = Hamiltonian_interlayer(mean_fields,J_perp)
+    for k in BZ 
+        H = Hamiltonian_intralayer(mean_fields,k,nn,K,J,G) + H_inter
+        bandstructure[k] = eigvals(H)
+    end
+    return bandstructure
+end
+
+function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0,J_perp=0)
+    final_mean_fields = run_bilayer_to_convergence(half_BZ,initial_Mean_fields,nn,tolerance,K,J,G,J_perp)
+    bandstructure = get_bilayer_bandstructure(BZ,final_mean_fields,nn,K,J,G,J_perp)
+    plot_bands_G_to_K(BZ,bandstructure,true)
+    return final_mean_fields
 end
