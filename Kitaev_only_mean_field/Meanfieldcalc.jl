@@ -192,6 +192,8 @@ function Hamiltonian_combined(mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
     """
     M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
     M_G = zeros(Complex{Float64},8,8,3)
+    M_full = zeros(Complex{Float64},8,8)
+    H = zeros(Complex{Float64},8,8)
 
     for alpha = 1:3
         for beta = 1:3
@@ -210,14 +212,17 @@ function Hamiltonian_combined(mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
             M_G[5,5+beta,alpha] = mean_fields[1,1+gamma,alpha] # adds terms associated with <S_i>
             M_G[1,1+beta,alpha] = mean_fields[5,5+gamma,alpha] # adds terms associated with <S_j>
             M_G[1,5,alpha] = -mean_fields[1+beta,1+gamma,alpha] # adds terms mixing gauge majoranas <iX^bX^c>
-            M_G[1+beta,5+gamma,alpha] = mean_fields[1,5,alpha] # adds terms u^0_ij 
+            M_G[1+beta,5+gamma,alpha] = -mean_fields[1,5,alpha] # adds terms u^0_ij 
             M_G[1,5+beta,alpha] = mean_fields[1+gamma,5,alpha] # adds sector mixing terms m'_ij
             M_G[1+beta,5,alpha] = mean_fields[1,5+gamma,alpha] # adds sector mixing terms m_ij
         end
         M_G[:,:,alpha] = antisymmetrise(M_G[:,:,alpha])
 
+        M_full = (K[alpha]*M[:,:,alpha,alpha]+J*sum(M[:,:,:,alpha],dims=3)+G*M_G[:,:,alpha])[:,:,1]
+        display(M_full)
+        H += 0.5*im*Fourier(M_full,k,nn[alpha])
     end
-
+    return H 
 end     
 
 function Fourier(M,k,neighbour_vector)
