@@ -14,7 +14,7 @@ nz = -(2a1 + a2)/3
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector 
 
 # sets the coupling parameters
-K = [1,1,1]
+K = -[1,1,1]
 J = 0
 G = 0
 
@@ -69,7 +69,7 @@ function brillouinzone(g1, g2, N, half=true)
 end
 
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
-N = 50
+N = 100
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
@@ -96,7 +96,7 @@ function initial_guess_mean_fields(uC=-1,uK=1,uJ=0,random=0)
     return mean_fields
 end
 
-function Hamiltonian_K(mean_fields,k,nn,K=[1,1,1])
+function Hamiltonian_K(mean_fields,k,nn,K=-[1,1,1])
     """
     Calculates the Hamiltonian for a given wavevector as an 8x8 matrix
     This assumes only Kitaev coupling, no Heisenberg or Gamma terms 
@@ -131,8 +131,8 @@ function Hamiltonian_J(mean_fields,k,nn,J=1)
     M = zeros(Complex{Float64},8,8,3,3) # 3rd dimension specifies which majoranas are coupled, 4th dimension specifies bond type 
     H_J = zeros(Complex{Float64},8,8)
     
-    for alpha = 1:3
-        for beta = 1:3
+    for beta = 1:3
+        for alpha = 1:3
             M[1,1+alpha,alpha,beta] = mean_fields[5,5+alpha,beta]
             M[5,5+alpha,alpha,beta] = mean_fields[1,1+alpha,beta]
             M[1,5,alpha,beta] = -mean_fields[1+alpha,5+alpha,beta]
@@ -140,9 +140,8 @@ function Hamiltonian_J(mean_fields,k,nn,J=1)
             M[1,5+alpha,alpha,beta] = mean_fields[1+alpha,5,beta]
             M[1+alpha,5,alpha,beta] = mean_fields[1,5+alpha,beta]
             M[:,:,alpha,beta] = antisymmetrise(M[:,:,alpha,beta])
-
-            H_J += 0.5im*J*Fourier(M[:,:,alpha,beta],k,nn[beta])
         end
+        H_J += 0.5im*J*Fourier(sum(M[:,:,:,beta],dims=3)[:,:,1],k,nn[beta])
     end
     return H_J
 end 
@@ -173,7 +172,7 @@ function Hamiltonian_G(mean_fields,k,nn,G=1)
     return H_G
 end
 
-function Hamiltonian_full(mean_fields,k,nn,K=[1,1,1],J=0,G=0)
+function Hamiltonian_full(mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
     """
     Calculates the full monolayer Hamiltonian by adding seperate terms
     """
@@ -234,7 +233,7 @@ function filter(M,tolerance=14.0)
     return real_filtered_M + im*imag_filtered_M
 end
 
-function update_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
+function update_mean_fields(half_BZ,old_mean_fields,nn,K=-[1,1,1],J=0,G=0)
     """
     calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
     then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
@@ -262,7 +261,7 @@ function update_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0)
     return updated_mean_fields
 end
 
-function run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
+function run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
     new_mean_fields = zeros(8,8,3)
     tol = 10^(-tolerance)
@@ -279,7 +278,7 @@ function run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1
     return round.(filter(new_mean_fields,tolerance),digits=trunc(Int,tolerance))
 end
 
-function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=[1,1,1],J=0,G=0)
+function run_for_fixed_number_of_steps(BZ,initial_mean_fields,nn,steps=100,K=-[1,1,1],J=0,G=0)
     old_mean_fields = initial_mean_fields
     new_mean_fields = update_mean_fields(BZ,old_mean_fields,nn,K,J,G)
     difference = new_mean_fields-old_mean_fields
@@ -322,7 +321,7 @@ end
 
 # This section calculates the bandstructure given a set of mean fields by calculating the eigenvalues of the corresponding Hamiltonian for each wavevector.
 # These functions can be used to plot interesting directions in the brillouin zone 
-function get_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0)
+function get_bandstructure(BZ,mean_fields,nn,K=-[1,1,1],J=0,G=0)
     """
     takes:
     - The BZ as a matrix of k vectors
@@ -369,11 +368,16 @@ function plot_bands_G_to_K(BZ,bandstructure,bilayer=false)
     end 
     kGtoK = (1:length(GtoK))*(g1[1]+g2[1])/(2*length(GtoK))
     for i in 1:num_majoranas
-        plot(kGtoK,bands_GtoK[i])
+        plot(kGtoK,bands_GtoK[i],color="black")
     end
-    title("Majorana bandstructure between \$\\Gamma\$ and \$ K \$ points")
+    title("\$\\Gamma=-0.\$ J=-0.2 between \$\\Gamma\$ and \$ K \$ points")
     ylabel("Energy")
     xlabel("Wavevector")
+
+    #This section sets x,y axis limits to make easier comparison to results from "Dynamics of QSL beyond integrability, J. Knolle et al"
+    ax = gca()
+    ax[:set_xlim]([3.14,5.3])
+    ax[:set_ylim]([0,1])
 end
 
 function plot_bands_G_to_M(BZ,bandstructure)
@@ -418,7 +422,7 @@ function plot_BZ(BZ)
     scatter(g1[1],g1[2])
 end
 
-function converge_and_plot(BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0)
+function converge_and_plot(BZ,initial_mean_fields,nn,tolerance=10.0,K=-[1,1,1],J=0,G=0)
     """
     Combines functions to allow you to calculate final fields and plot the bands at once 
     returns the converged mean fields 
@@ -476,7 +480,7 @@ function Hamiltonian_interlayer(Mean_fields,J_perp)
     return 0.5*im*J_perp*H_perp
 end
 
-function Hamiltonian_intralayer(Mean_fields,k,nn,K=[1,1,1],J=0,G=0)
+function Hamiltonian_intralayer(Mean_fields,k,nn,K=-[1,1,1],J=0,G=0)
     """
     Calculates the Intralayer Hamiltonian for the bilayer model.
     Returns a 16x16 matrix with 8x8 blocks along the diagonal given by the monolayer Hamiltonian 
@@ -487,7 +491,7 @@ function Hamiltonian_intralayer(Mean_fields,k,nn,K=[1,1,1],J=0,G=0)
     return H_intra 
 end
 
-function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=-[1,1,1],J=0,G=0,J_perp=0)
     """
     calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
     then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
@@ -527,7 +531,7 @@ function Fourier_bilayer(M,k,neighbour_vector)
     return (F')*M*F
 end
 
-function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0,J_perp=0)
+function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-[1,1,1],J=0,G=0,J_perp=0)
     """
     Given a set of 16x16x3 mean fields and half BZ this repeatedly updates mean fields by calculating the Hamiltonian from initial mean fields and returning the mean fields they generate. 
     Checks for convergence by calculating the difference in real part of the mean field matrix between two iterations, and checking that there is no element for which the difference is larger than the specified tolerance. 
@@ -570,7 +574,7 @@ function get_bilayer_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
     return bandstructure
 end
 
-function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=10.0,K=[1,1,1],J=0,G=0,J_perp=0)
+function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=10.0,K=-[1,1,1],J=0,G=0,J_perp=0)
     """
     combines functions to take initial 16x16x3 mean fields and iterate until they converge, and then plots the band structure. 
     """
