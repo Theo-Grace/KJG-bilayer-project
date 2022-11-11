@@ -360,3 +360,140 @@ function converge_and_plot(BZ,half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1
     return final_mean_fields
 end
 
+# This section adds functions to treat the bilayer model 
+
+mean_fields_interlayer_i = [1 0 0 0 ; 0 -0.25 0  0 ; 0 0 -0.25 0 ; 0 0 0 -0.25]
+mean_fields_interlayer_j = [1 0 0 0 ; 0 -0.25 0  0 ; 0 0 -0.25 0 ; 0 0 0 -0.25]
+mean_fields_intralayer_1 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5]
+mean_fields_intralayer_2 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5]
+
+Mean_fields = [ mean_fields_intralayer_1 mean_fields_interlayer_i ; mean_fields_interlayer_j mean_fields_intralayer_2 ] + 0.1*rand(8,8)
+
+function Hamiltonian_interlayer(Mean_fields,J_perp)
+    H_perp = zeros(Complex{Float64},16,16)
+
+    Tx = [0 -1 0 0 ; 1 0 0 0 ; 0 0 0 0 ; 0 0 0 0]
+    Ty = [0 0 -1 0 ; 0 0 0 0; 1 0 0 0; 0 0 0 0]
+    Tz = [0 0 0 -1 ; 0 0 0 0 ; 0 0 0 0 ; 1 0 0 0]
+    T = [Tx,Ty,Tz]
+
+    for alpha = 1:3
+        H_perp[1:4,9:12] += 0.5*im*J_perp*(T[alpha]*Mean_fields[1:4,5:8]*T[alpha])
+        H_perp[5:8,13:16] += 0.5*im*J_perp*(T[alpha]*Mean_fields[5:8,1:4]*T[alpha])
+    end
+
+    H_perp[9:16,1:8] = H_perp[1:8,9:16]'
+
+    return H_perp
+end
+
+function Hamiltonian_intralayer(Mean_fields,k,nn,K=-1,J=0,G=0)
+    H_intra = zeros(Complex{Float64},16,16)
+
+    H_intra[1:8,1:8] = Hamiltonian_combined(Mean_fields[1:4,1:4],k,nn,K,J,G)
+    H_intra[9:16,9:16] = Hamiltonian_combined(Mean_fields[5:8,5:8],k,nn,K,J,G)
+
+    return H_intra
+end
+
+function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=-1,J=0,G=0,J_perp=0)
+    """
+    calculates an updated mean field matrix. This calculates the Hamiltonian from a given set of mean fields,
+    then diagonalises the Hamiltonian and calculates a set of mean fields from that Hamiltonian
+    Requires:
+    - Brillouin zone as a matrix of k vectors
+    - a current mean field 16x16x3 matrix 
+    - nearest neighbour vectors nn 
+    - Coupling parameters K, J, G, J_perp (default is isotropic K and J=G=0)
+    returns
+    - a new mean field 16x16x3 matrix
+    """
+    Num_unit_cells = 2*length(half_BZ)
+    updated_mean_fields = zeros(Complex{Float64},16,16)
+    H_inter = Hamiltonian_interlayer(old_mean_fields,J_perp)
+
+    for k in half_BZ
+        H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
+        U , occupancymatrix = diagonalise(H)
+    
+        updated_mean_fields[:,:] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[1])
+        updated_mean_fields[:,:] -= (Fourier_bilayer(U*occupancymatrix*U',-k,nn[1]))
+    
+    end
+
+    updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
+
+    return real.([ updated_mean_fields[1:4,5:8] updated_mean_fields[1:4,9:12] ; updated_mean_fields[5:8,13:16] updated_mean_fields[9:12,13:16] ])
+end
+
+function Fourier_bilayer(M,k,neighbour_vector)
+    """
+    Given an 16x16 matrix M 
+    This implements a Fourier transform from mean fields in real space to momentum space
+    """
+    phase = exp(im*dot(k,neighbour_vector))
+    F = Diagonal([1,1,1,1,phase,phase,phase,phase,1,1,1,1,phase,phase,phase,phase])
+    return (F')*M*F
+end
+
+function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1,J=0,G=0,J_perp=0)
+    """
+    Given a set of 16x16x3 mean fields and half BZ this repeatedly updates mean fields by calculating the Hamiltonian from initial mean fields and returning the mean fields they generate. 
+    Checks for convergence by calculating the difference in real part of the mean field matrix between two iterations, and checking that there is no element for which the difference is larger than the specified tolerance. 
+    """
+    old_mean_fields = initial_mean_fields
+    new_mean_fields = zeros(8,8)
+    old_old_mean_fields = zeros(8,8)
+    tol = 10^(-tolerance)
+    it_num = 0 
+    not_converged = true
+    not_oscillating = true 
+    while not_converged
+        new_mean_fields = update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K,J,G,J_perp)
+        diff= abs.(new_mean_fields-old_mean_fields)
+        diff2 = abs.(new_mean_fields - old_old_mean_fields)
+        not_converged = any(diff .> tol)
+        println(it_num)
+        not_oscillating = any(diff2 .> tol)
+        if not_oscillating == false
+            println("Oscillating solution")
+            break
+        end
+        it_num +=1 
+        old_old_mean_fields = old_mean_fields
+        old_mean_fields = new_mean_fields
+    end
+    return round.(new_mean_fields,digits=trunc(Int,tolerance))
+end
+
+function get_bilayer_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+    """
+    takes:
+    - The BZ as a matrix of k vectors
+    - an 16x16x3 matrix of mean fields mean_fields 
+    - nearest neighbour vectors in a vector nn
+    - Kitaev coupling parameters as a vector K
+    - Heisenberg coupling J as a scalar
+    - Gamma coupling G as a scalar 
+    returns:
+    - A dictionary called bandstructure with a key for each k in the Brillouin zone whose entries are a vector
+    containing the energies for that k 
+    """
+    bandstructure = Dict()
+    H_inter = Hamiltonian_interlayer(mean_fields,J_perp)
+    for k in BZ 
+        H = Hamiltonian_intralayer(mean_fields,k,nn,K,J,G) + H_inter
+        bandstructure[k] = eigvals(H)
+    end
+    return bandstructure
+end
+
+function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=10.0,K=-1,J=0,G=0,J_perp=0)
+    """
+    combines functions to take initial 16x16x3 mean fields and iterate until they converge, and then plots the band structure. 
+    """
+    final_mean_fields = run_bilayer_to_convergence(half_BZ,initial_Mean_fields,nn,tolerance,K,J,G,J_perp)
+    bandstructure = get_bilayer_bandstructure(BZ,final_mean_fields,nn,K,J,G,J_perp)
+    plot_bands_G_to_K(BZ,bandstructure,true)
+    return final_mean_fields
+end
