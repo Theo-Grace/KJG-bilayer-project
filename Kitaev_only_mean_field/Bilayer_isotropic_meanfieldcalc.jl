@@ -82,7 +82,7 @@ g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
 
-mean_fields = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] + 0.0001*rand(4,4)
+mean_fields = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] + 0.01*rand(4,4)
 
 function Fourier(M,k,neighbour_vector)
     """
@@ -95,6 +95,9 @@ function Fourier(M,k,neighbour_vector)
 end
 
 function transform_bond_type(mean_fields,alpha)
+    """
+    Given a 4x4 matrix of mean fields <iX_iX_j^T> calculated with a bond ij of type x, this transforms the mean fields to the equivalent matrix if it had been calculated with bond type alpha = x, y, z
+    """
     Qx = diagm([1,1,1,1])
     Qy = [1 0 0 0 ; 0 0 1 0 ; 0 1 0 0 ; 0 0 0 1]
     Qz = [1 0 0 0 ; 0 0 0 1 ; 0 0 1 0 ; 0 1 0 0]
@@ -103,6 +106,8 @@ function transform_bond_type(mean_fields,alpha)
     return Q[alpha]*mean_fields*Q[alpha]
 end
 
+# This set of functions calculates seperate terms in the Hamiltonian assuming isotropic coupling constants
+#=
 function get_M(mean_fields,alpha)
     Tx = [0 -1 0 0 ; 1 0 0 0 ; 0 0 0 0 ; 0 0 0 0]
     Ty = [0 0 -1 0 ; 0 0 0 0; 1 0 0 0; 0 0 0 0]
@@ -170,8 +175,20 @@ function Hamiltonian_full(mean_fields,k,nn,K=-1,J=0,G=0)
     end 
     return H
 end    
+=# 
 
 function Hamiltonian_combined(mean_fields,k,nn,K=-1,J=0,G=0)
+    """
+    Takes:
+    - a 4x4 matrix of mean fields <iX_iX_j^T> calculated with a bond ij of type x
+    - 2D wavevector k 
+    - nearest neighbour vectors nn
+    - isotropic coupling constants K J G
+    Returns
+    - an 8x8 Hamiltonian including all 3 terms
+    """
+
+    # These matricies can be used to tranform the original mean field matrix into the form that it appears in the Hamiltonian
     Tx = [0 -1 0 0 ; 1 0 0 0 ; 0 0 0 0 ; 0 0 0 0]
     Ty = [0 0 -1 0 ; 0 0 0 0; 1 0 0 0; 0 0 0 0]
     Tz = [0 0 0 -1 ; 0 0 0 0 ; 0 0 0 0 ; 1 0 0 0]
@@ -361,13 +378,14 @@ function converge_and_plot(BZ,half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1
 end
 
 # This section adds functions to treat the bilayer model 
+# Mean fields in this section are given by 8x8 matrices. The intralayer mean fields are 4x4 on diagonal blocks and the off diagonal blocks are interlayer mean fields 
 
-mean_fields_interlayer_i = [1 0 0 0 ; 0 -0.25 0  0 ; 0 0 -0.25 0 ; 0 0 0 -0.25]
-mean_fields_interlayer_j = [1 0 0 0 ; 0 -0.25 0  0 ; 0 0 -0.25 0 ; 0 0 0 -0.25]
-mean_fields_intralayer_1 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5]
-mean_fields_intralayer_2 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5]
+mean_fields_interlayer_i = [1 0 0 0 ; 0 0.25 0  0 ; 0 0 0.25 0 ; 0 0 0 0.25] # <i X_1i X_2i^T>
+mean_fields_interlayer_j = [-1 0 0 0 ; 0 -0.25 0  0 ; 0 0 -0.25 0 ; 0 0 0 -0.25] # <i X_1j X_2j^T>
+mean_fields_intralayer_1 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] # <i X_1i X_1j^T>
+mean_fields_intralayer_2 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] # <i X_2i X_2j^T>
 
-Mean_fields = [ mean_fields_intralayer_1 mean_fields_interlayer_i ; mean_fields_interlayer_j mean_fields_intralayer_2 ] + 0.1*rand(8,8)
+Mean_fields = [ mean_fields_intralayer_1 mean_fields_interlayer_i ; mean_fields_interlayer_j mean_fields_intralayer_2 ] + 0.05*rand(8,8)
 
 function Hamiltonian_interlayer(Mean_fields,J_perp)
     H_perp = zeros(Complex{Float64},16,16)
@@ -459,6 +477,9 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
             println("Oscillating solution")
             break
         end
+        if it_num%300 ==0
+            tol = 10^(-tolerance + it_num/300)
+        end
         it_num +=1 
         old_old_mean_fields = old_mean_fields
         old_mean_fields = new_mean_fields
@@ -466,7 +487,7 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
     return round.(new_mean_fields,digits=trunc(Int,tolerance))
 end
 
-function get_bilayer_bandstructure(BZ,mean_fields,nn,K=[1,1,1],J=0,G=0,J_perp=0)
+function get_bilayer_bandstructure(BZ,mean_fields,nn,K=-1,J=0,G=0,J_perp=0)
     """
     takes:
     - The BZ as a matrix of k vectors
@@ -497,3 +518,58 @@ function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=1
     plot_bands_G_to_K(BZ,bandstructure,true)
     return final_mean_fields
 end
+
+
+# Creates functions to do parameter scans 
+function scan_J_coupling(initial_mean_fields, half_BZ, nn,J_list,tolerance = 10.0, K=-1,G=0,J_perp=0)
+    num_J_values = size(J_list)[1]
+    stored_mean_fields = zeros(8,8,num_J_values)
+    current_mean_fields = initial_mean_fields
+    for (id,J) in enumerate(J_list)
+        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
+        current_mean_fields = stored_mean_fields[:,:,id] + 0.00001*rand(8,8)
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id])
+        display(id)
+    end
+    return stored_mean_fields
+end
+
+function scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance = 10.0, K=-1,J=0,J_perp=0)
+    num_G_values = size(G_list)[1]
+    stored_mean_fields = zeros(8,8,num_G_values)
+    current_mean_fields = initial_mean_fields
+    for (id,G) in enumerate(G_list)
+        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
+        current_mean_fields = stored_mean_fields[:,:,id] + 0.0001*rand(8,8)
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id])
+        display(id)
+    end
+    return stored_mean_fields
+end
+
+function scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0)
+    num_J_perp_values = size(J_perp_list)[1]
+    stored_mean_fields = zeros(8,8,num_J_perp_values)
+    current_mean_fields = initial_mean_fields
+    for (id,J_perp) in enumerate(J_perp_list)
+        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
+        current_mean_fields = stored_mean_fields[:,:,id] + 0.001*rand(8,8)
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_perp_list[1:id])
+        display(id)
+    end
+    return stored_mean_fields
+end
+
+function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list)
+    plot(coupling_list,stored_mean_fields[1,1,:],color="blue")
+    plot(coupling_list,stored_mean_fields[2,2,:],color="purple")
+    plot(coupling_list,stored_mean_fields[3,3,:],color="red")
+    plot(coupling_list,stored_mean_fields[3,4,:],color="orange")
+    plot(coupling_list,stored_mean_fields[2,6,:],color="green")
+
+    title("Phase diagram for bilayer KJ\$\\Gamma\$ model (K=-1,\$ J=0, J_{\\perp}\$=1)")
+    xlabel("\$\\Gamma \$/K")
+    ylabel("mean fields")
+    legend(["\$u_{ij}^0\$","\$u_{ij}^x\$","\$u_{ij}^y\$","\$ u_{ij}^{yz}\$","\$ u_{12}^x\$"])
+end
+
