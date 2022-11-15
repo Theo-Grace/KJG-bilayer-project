@@ -388,6 +388,14 @@ mean_fields_intralayer_2 = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] # 
 Mean_fields = [ mean_fields_intralayer_1 mean_fields_interlayer_i ; mean_fields_interlayer_j mean_fields_intralayer_2 ] + 0.05*rand(8,8)
 
 function Hamiltonian_interlayer(Mean_fields,J_perp)
+    """
+    Creates the 16x16 interlayer Hamiltonian.
+    ASSUMPTIONS:
+    - AA stacking
+    - Heisenberg interactions between nearest neighbours only
+    - isotropic monolayer interactions 
+    - no spin ordering 
+    """
     H_perp = zeros(Complex{Float64},16,16)
 
     Tx = [0 -1 0 0 ; 1 0 0 0 ; 0 0 0 0 ; 0 0 0 0]
@@ -406,6 +414,12 @@ function Hamiltonian_interlayer(Mean_fields,J_perp)
 end
 
 function Hamiltonian_intralayer(Mean_fields,k,nn,K=-1,J=0,G=0)
+    """
+    Produces a 16x16 Hamiltonian containing the Hamiltonian for a KJG monolayer in the 2 8x8 on diagonal blocks
+    ASSUMPTIONS:
+    - isotropic monolayer interactions 
+    - no spin ordering 
+    """
     H_intra = zeros(Complex{Float64},16,16)
 
     H_intra[1:8,1:8] = Hamiltonian_combined(Mean_fields[1:4,1:4],k,nn,K,J,G)
@@ -454,7 +468,7 @@ function Fourier_bilayer(M,k,neighbour_vector)
     return (F')*M*F
 end
 
-function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1,J=0,G=0,J_perp=0)
+function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1,J=0,G=0,J_perp=0,tol_drop_iteration=500)
     """
     Given a set of 16x16x3 mean fields and half BZ this repeatedly updates mean fields by calculating the Hamiltonian from initial mean fields and returning the mean fields they generate. 
     Checks for convergence by calculating the difference in real part of the mean field matrix between two iterations, and checking that there is no element for which the difference is larger than the specified tolerance. 
@@ -464,27 +478,43 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
     old_old_mean_fields = zeros(8,8)
     tol = 10^(-tolerance)
     it_num = 0 
+    osc_num = 0
     not_converged = true
     not_oscillating = true 
+    mark_with_x = false
     while not_converged
         new_mean_fields = update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K,J,G,J_perp)
         diff= abs.(new_mean_fields-old_mean_fields)
         diff2 = abs.(new_mean_fields - old_old_mean_fields)
         not_converged = any(diff .> tol)
         println(it_num)
-        not_oscillating = any(diff2 .> tol)
+
+        not_oscillating = any(diff2 .> 0.01*tol)
         if not_oscillating == false
+            osc_num += 1
+            println("osc number is $osc_num")
+            display(diff.*(diff .>tol))
+            display(diff2.*(diff2 .>tol))
+        else
+            osc_num = 0
+        end
+
+        if osc_num >= 10
             println("Oscillating solution")
+            mark_with_x = true
             break
         end
-        if it_num%300 ==0
-            tol = 10^(-tolerance + it_num/300)
+        if it_num%tol_drop_iteration == 0 && it_num >0
+            tol = 10*tol
+            println(tol)
+            mark_with_x = true
         end
+
         it_num +=1 
         old_old_mean_fields = old_mean_fields
         old_mean_fields = new_mean_fields
     end
-    return round.(new_mean_fields,digits=trunc(Int,tolerance))
+    return new_mean_fields , mark_with_x
 end
 
 function get_bilayer_bandstructure(BZ,mean_fields,nn,K=-1,J=0,G=0,J_perp=0)
@@ -520,7 +550,7 @@ function bilayer_converge_and_plot(BZ,half_BZ,initial_Mean_fields,nn,tolerance=1
 end
 
 
-# Creates functions to do parameter scans 
+# This section contains functions to do parameter scans 
 function scan_J_coupling(initial_mean_fields, half_BZ, nn,J_list,tolerance = 10.0, K=-1,G=0,J_perp=0)
     num_J_values = size(J_list)[1]
     stored_mean_fields = zeros(8,8,num_J_values)
@@ -547,25 +577,31 @@ function scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance = 10.
     return stored_mean_fields
 end
 
-function scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0)
+function scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0,tol_drop_iteration=500)
     num_J_perp_values = size(J_perp_list)[1]
     stored_mean_fields = zeros(8,8,num_J_perp_values)
     current_mean_fields = initial_mean_fields
+    marked_with_x = [false for _ in 1:num_J_perp_values]
+
     for (id,J_perp) in enumerate(J_perp_list)
-        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
-        current_mean_fields = stored_mean_fields[:,:,id] + 0.001*rand(8,8)
+        stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
+        marked_with_x[id] = mark_with_x
+        current_mean_fields = stored_mean_fields[:,:,id] + 0.1*fix_signs(rand(8,8))
         plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_perp_list[1:id])
+        plot_mean_fields_check(stored_mean_fields[:,:,id],J_perp_list[id],mark_with_x,K,J,G,0,false)
         display(id)
     end
-    return stored_mean_fields
+    
+    return stored_mean_fields , marked_with_x
 end
 
 function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list)
-    plot(coupling_list,stored_mean_fields[1,1,:],color="blue")
-    plot(coupling_list,stored_mean_fields[2,2,:],color="purple")
-    plot(coupling_list,stored_mean_fields[3,3,:],color="red")
-    plot(coupling_list,stored_mean_fields[3,4,:],color="orange")
-    plot(coupling_list,stored_mean_fields[2,6,:],color="green")
+
+    plot(coupling_list,stored_mean_fields[1,1,:],color="blue") # uC calculated on x bond
+    plot(coupling_list,stored_mean_fields[2,2,:],color="purple") # uK calculated on x bond
+    plot(coupling_list,stored_mean_fields[3,3,:],color="red") # uJ calculated on x bond
+    plot(coupling_list,stored_mean_fields[3,4,:],color="orange") # uG calculated on x bond 
+    plot(coupling_list,stored_mean_fields[2,6,:],color="green") # interlayer mean field mixing x gauge bonds on the same side 
 
     title("Phase diagram for bilayer KJ\$\\Gamma\$ model (K=-1,\$ J=0, J_{\\perp}\$=1)")
     xlabel("\$\\Gamma \$/K")
@@ -573,3 +609,100 @@ function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list)
     legend(["\$u_{ij}^0\$","\$u_{ij}^x\$","\$u_{ij}^y\$","\$ u_{ij}^{yz}\$","\$ u_{12}^x\$"])
 end
 
+function plot_oscillating_fields_vs_coupling(stored_mean_fields,marked_with_x,coupling_list)
+
+    for (id,mark_with_x) in enumerate(marked_with_x)
+        if mark_with_x == true
+            scatter(coupling_list[id],stored_mean_fields[1,1,id],marker = "x",color="blue")
+            scatter(coupling_list[id],stored_mean_fields[2,2,id],marker = "x",color="purple")
+            scatter(coupling_list[id],stored_mean_fields[3,3,id],marker = "x",color="red")
+            scatter(coupling_list[id],stored_mean_fields[3,4,id],marker = "x",color="orange")
+            scatter(coupling_list[id],stored_mean_fields[2,6,id],marker = "x",color="green")
+        end
+    end 
+end
+
+# This section adds functions to check the code is converging correctly.
+function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
+    """
+    This generates a set of N=num_checks random 8x8 mean field matrices and then then iterates each one to convergence and plots the resulting mean fields as a scatter plot. This allows you to check the distribution of outputs,
+    and check that the code is converging consistently. 
+    """
+    stored_fields = 0.5*rand(8,8,num_checks)
+    
+    #=
+    # This fixes the signs to be consistent with the Kitaev exact solution
+    stored_fields[1,1,:] = abs.(stored_fields[1,1,:]) 
+    stored_fields[5,5,:] = abs.(stored_fields[5,5,:])
+    stored_fields[2,2,:] = -abs.(stored_fields[2,2,:])
+    stored_fields[6,6,:] = -abs.(stored_fields[6,6,:])
+
+    # This chooses a sign convention to avoid oscillating solutions involving interlayer terms 
+    stored_fields[1,5,:] = abs.(stored_fields[1,5,:])
+    stored_fields[2,6,:] = abs.(stored_fields[2,6,:])
+    stored_fields[3,7,:] = abs.(stored_fields[3,7,:])
+    stored_fields[4,8,:] = abs.(stored_fields[4,8,:])
+
+    stored_fields[5,1,:] = -abs.(stored_fields[5,1,:])
+    stored_fields[6,2,:] = -abs.(stored_fields[6,2,:])
+    stored_fields[7,3,:] = -abs.(stored_fields[7,3,:])
+    stored_fields[8,4,:] = -abs.(stored_fields[8,4,:])
+
+    # This chooses consist signs to avoid oscillating solutions with Heisenberg term 
+    stored_fields[3,3,:] = abs.(stored_fields[3,3,:])
+    stored_fields[4,4,:] = abs.(stored_fields[4,4,:])
+    stored_fields[7,7,:] = abs.(stored_fields[7,7,:])
+    stored_fields[8,8,:] = abs.(stored_fields[8,8,:])
+    =#
+
+    stored_fields = fix_signs(stored_fields)
+
+    check_list = 1:num_checks
+    for N in check_list
+        stored_fields[:,:,N] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_fields[:,:,N],nn,tolerance,K,J,G,J_perp)
+        plot_mean_fields_check(stored_fields[:,:,N],check_list[N],mark_with_x,K,J,G,J_perp)
+        display(stored_fields[:,:,N])
+    end
+
+    return stored_fields
+end
+
+function fix_signs(random_fields)
+    """
+    Takes an 8x8xN array of matrices and fixes the signs of certain terms to avoid oscillating solutions in which the fields do not converge to a fixed set but instead flip between fields with differing sign. 
+    NOTE: This makes a choice of sign convention 
+    """
+    num_matrices = size(random_fields,3)
+
+    sign_fixing_mask = ones(8,8,num_matrices)
+    sign_fixing_mask[2,2,:] .= -1
+    sign_fixing_mask[6,6,:] .= -1
+    for j = 1:4
+        sign_fixing_mask[4+j,j,:] .= -1
+    end
+
+    return sign_fixing_mask.*random_fields
+end
+
+function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,J_perp,title=true)
+    if mark_with_x == true
+        mark = "x" # oscillating solutions and solutions at lower tolerance are marked by a x 
+    elseif title == true
+        mark = "o "  
+    elseif title ==false
+        mark = " "
+    end
+
+    scatter(check_list,stored_mean_fields[1,1,:],marker = mark,color="blue")
+    scatter(check_list,stored_mean_fields[2,2,:],marker = mark,color="purple")
+    scatter(check_list,stored_mean_fields[3,3,:],marker = mark,color="red")
+    scatter(check_list,stored_mean_fields[3,4,:],marker = mark,color="orange")
+    scatter(check_list,stored_mean_fields[2,6,:],marker = mark,color="green")
+
+    if title == true
+        title("Checking convergence for parameters K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
+        xlabel("Check number")
+        ylabel("mean fields")
+        legend(["\$u_{ij}^0\$","\$u_{ij}^x\$","\$u_{ij}^y\$","\$ u_{ij}^{yz}\$","\$ u_{12}^x\$"])
+    end
+end
