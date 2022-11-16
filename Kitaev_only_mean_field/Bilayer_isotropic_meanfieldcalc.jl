@@ -472,6 +472,7 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
     """
     Given a set of 16x16x3 mean fields and half BZ this repeatedly updates mean fields by calculating the Hamiltonian from initial mean fields and returning the mean fields they generate. 
     Checks for convergence by calculating the difference in real part of the mean field matrix between two iterations, and checking that there is no element for which the difference is larger than the specified tolerance. 
+    Checks for oscillating solutions by calculating the second difference. This must be less than 100x smaller than the specified tolerance for 10 successive iterations to be identified as oscillatory
     """
     old_mean_fields = initial_mean_fields
     new_mean_fields = zeros(8,8)
@@ -514,7 +515,7 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
         old_old_mean_fields = old_mean_fields
         old_mean_fields = new_mean_fields
     end
-    return new_mean_fields , mark_with_x
+    return round.(new_mean_fields,digits=trunc(Int,tolerance)) , mark_with_x
 end
 
 function get_bilayer_bandstructure(BZ,mean_fields,nn,K=-1,J=0,G=0,J_perp=0)
@@ -577,17 +578,24 @@ function scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance = 10.
     return stored_mean_fields
 end
 
-function scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0,tol_drop_iteration=500)
+function scan_J_perp_coupling(stored_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0,tol_drop_iteration=500)
+    """
+    Takes:
+    - a matrix of 8x8xN random fields, with the signs fixed according to the chosen convention. 
+    - a list of N J_perp values at which the mean fields will be calculated
+    Returns:
+    - an 8x8xN matrix of mean fields calculated to the specified tolerance
+    - a list of boolean values marked_with_x. A true value in this list indicates that the solution was either oscillatory or calculated with higher tolerance  
+    """
     num_J_perp_values = size(J_perp_list)[1]
-    stored_mean_fields = zeros(8,8,num_J_perp_values)
-    current_mean_fields = initial_mean_fields
     marked_with_x = [false for _ in 1:num_J_perp_values]
+    title_str = "Varying \$J_{\\perp}\$ with couplings K=$K J=$J \$\\Gamma\$=$G"
+    xlab="\$J_{\\perp}\$/|K|"
 
     for (id,J_perp) in enumerate(J_perp_list)
-        stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
+        stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
-        current_mean_fields = stored_mean_fields[:,:,id] + 0.1*fix_signs(rand(8,8))
-        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_perp_list[1:id])
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_perp_list[1:id],title_str,xlab)
         plot_mean_fields_check(stored_mean_fields[:,:,id],J_perp_list[id],mark_with_x,K,J,G,0,false)
         display(id)
     end
@@ -595,7 +603,7 @@ function scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,toler
     return stored_mean_fields , marked_with_x
 end
 
-function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list)
+function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list,title_str="",xlab="")
 
     plot(coupling_list,stored_mean_fields[1,1,:],color="blue") # uC calculated on x bond
     plot(coupling_list,stored_mean_fields[2,2,:],color="purple") # uK calculated on x bond
@@ -603,13 +611,21 @@ function plot_mean_fields_vs_coupling(stored_mean_fields,coupling_list)
     plot(coupling_list,stored_mean_fields[3,4,:],color="orange") # uG calculated on x bond 
     plot(coupling_list,stored_mean_fields[2,6,:],color="green") # interlayer mean field mixing x gauge bonds on the same side 
 
-    title("Phase diagram for bilayer KJ\$\\Gamma\$ model (K=-1,\$ J=0, J_{\\perp}\$=1)")
-    xlabel("\$\\Gamma \$/K")
+    title(title_str)
+    xlabel(xlab)
     ylabel("mean fields")
     legend(["\$u_{ij}^0\$","\$u_{ij}^x\$","\$u_{ij}^y\$","\$ u_{ij}^{yz}\$","\$ u_{12}^x\$"])
 end
 
 function plot_oscillating_fields_vs_coupling(stored_mean_fields,marked_with_x,coupling_list)
+    """
+    Plots only the points that were marked x during calculation, indicating either oscillatory solution or that it was calculated at higher tolerance than otherwise specified. 
+    Takes:
+    - A complete list of 8x8xN calculated mean fields
+    - A list marked_with_x which specifies which points to plot 
+    - A list of couplings 
+    NOTE: This function should be used to overlay the results of plot_mean_fields_vs_coupling to show which points were oscillatory
+    """
 
     for (id,mark_with_x) in enumerate(marked_with_x)
         if mark_with_x == true
@@ -685,6 +701,10 @@ function fix_signs(random_fields)
 end
 
 function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,J_perp,title=true)
+    """
+    This plots mean fields calculated for a fixed set of coupling constants using a set of 8x8xN random initial matricies against N.
+    If all initial conditions converge to the same solution then this plot should be a series of horizontal lines.
+    """
     if mark_with_x == true
         mark = "x" # oscillating solutions and solutions at lower tolerance are marked by a x 
     elseif title == true
