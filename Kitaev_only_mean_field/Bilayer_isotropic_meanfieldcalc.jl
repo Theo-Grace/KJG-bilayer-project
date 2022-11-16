@@ -565,17 +565,21 @@ function scan_J_coupling(initial_mean_fields, half_BZ, nn,J_list,tolerance = 10.
     return stored_mean_fields
 end
 
-function scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance = 10.0, K=-1,J=0,J_perp=0)
+function scan_G_coupling(stored_mean_fields, half_BZ, nn,G_list,tolerance = 10.0, K=-1,J=0,J_perp=0,tol_drop_iteration=500)
     num_G_values = size(G_list)[1]
-    stored_mean_fields = zeros(8,8,num_G_values)
-    current_mean_fields = initial_mean_fields
+    marked_with_x = [false for _ in 1:num_G_values]
+    title_str = "Varying \$\\Gamma\$ with couplings K=$K J=$J \$J_{\\perp}\$=$J_perp"
+    xlab="\$\\Gamma\$/|K|"
+
     for (id,G) in enumerate(G_list)
-        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
-        current_mean_fields = stored_mean_fields[:,:,id] + 0.0001*rand(8,8)
-        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id])
+        stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
+        marked_with_x[id] = mark_with_x
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id],title_str,xlab)
+        plot_mean_fields_check(stored_mean_fields[:,:,id],G_list[id],mark_with_x,K,J,J_perp,0,false)
         display(id)
     end
-    return stored_mean_fields
+
+    return stored_mean_fields , marked_with_x
 end
 
 function scan_J_perp_coupling(stored_mean_fields, half_BZ, nn,J_perp_list,tolerance = 10.0, K=-1,J=0,G=0,tol_drop_iteration=500)
@@ -660,7 +664,7 @@ function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max
     Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
     The marked_with_x_list is true for values of J_perp which were marked"
 
-    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points))
+    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points),K,J,G,J_perp)
     stored_mean_fields , marked_with_x = scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance, K,J,G,tol_drop_iteration)
 
     group_name = "K=$K"*"_J=$J"*"_G=$G"*"_data"
@@ -679,6 +683,48 @@ function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max
     write(g,"marked_with_x_list",marked_with_x)
     close(fid)
 end
+
+function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tolerance,tol_drop_iteration=500)
+    
+    # sets the nearest neighbour vectors 
+    nx = (a1 - a2)/3
+    ny = (a1 + 2a2)/3
+    nz = -(2a1 + a2)/3
+
+    nn = [nx,ny,nz] # stores the nearest neighbours in a vector 
+
+    G_list = collect(LinRange(G_min,G_max,Num_scan_points))
+
+    N=sqrt(2*length(half_BZ))
+
+    Description = "The parameters used in this run were K=$K J=$J J_perp=$J_perp. 
+    The Brillouin zone resolution parameter was N=$N.
+    The tolerance used when checking convergence was tol=10^(-$tolerance).
+    The number of J_perp values used was $Num_scan_points between $G_min and $G_max.
+    The signs of random fields were fixed.
+    Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
+    The marked_with_x_list is true for values of J_perp which were marked"
+
+    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points),K,J,G,J_perp)
+    stored_mean_fields , marked_with_x = scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance, K,J,J_perp,tol_drop_iteration)
+
+    group_name = "K=$K"*"_J=$J"*"_J_perp=$J_perp"*"_data"
+
+    fid = h5open("parameter_scan_data/G_scans","cw")
+    it_num = 2
+    while group_name in keys(fid)
+        global group_name = group_name*"_$it_num"
+    end
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"output_mean_fields",stored_mean_fields)
+    write(g,"Description_of_run",Description)
+    write(g,"G_list",G_list)
+    write(g,"marked_with_x_list",marked_with_x)
+    close(fid)
+end
+
 
 
 
@@ -716,7 +762,7 @@ function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
     stored_fields[8,8,:] = abs.(stored_fields[8,8,:])
     =#
 
-    stored_fields = fix_signs(stored_fields)
+    stored_fields = fix_signs(stored_fields,K,J,G,J_perp)
 
     check_list = 1:num_checks
     for N in check_list
@@ -728,7 +774,7 @@ function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
     return stored_fields
 end
 
-function fix_signs(random_fields)
+function fix_signs(random_fields,K,J,G,J_perp)
     """
     Takes an 8x8xN array of matrices and fixes the signs of certain terms to avoid oscillating solutions in which the fields do not converge to a fixed set but instead flip between fields with differing sign. 
     NOTE: This makes a choice of sign convention 
@@ -742,19 +788,26 @@ function fix_signs(random_fields)
         sign_fixing_mask[4+j,j,:] .= -1
     end
 
+    if G < 0 # Found that for G<0 need to have uG the same sign as uK for converging solution
+        sign_fixing_mask[3,4,:] .=-1
+        sign_fixing_mask[4,3,:] .=-1
+        sign_fixing_mask[7,8,:] .=-1
+        sign_fixing_mask[8,7,:] .=-1
+    end 
+
     return sign_fixing_mask.*random_fields
 end
 
-function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,J_perp,title=true)
+function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,J_perp,ttl_str=true)
     """
     This plots mean fields calculated for a fixed set of coupling constants using a set of 8x8xN random initial matricies against N.
     If all initial conditions converge to the same solution then this plot should be a series of horizontal lines.
     """
     if mark_with_x == true
         mark = "x" # oscillating solutions and solutions at lower tolerance are marked by a x 
-    elseif title == true
-        mark = "o "  
-    elseif title ==false
+    elseif ttl_str == true
+        mark = "o"  
+    elseif ttl_str ==false
         mark = " "
     end
 
@@ -764,7 +817,7 @@ function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,
     scatter(check_list,stored_mean_fields[3,4,:],marker = mark,color="orange")
     scatter(check_list,stored_mean_fields[2,6,:],marker = mark,color="green")
 
-    if title == true
+    if ttl_str == true
         title("Checking convergence for parameters K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
         xlabel("Check number")
         ylabel("mean fields")
