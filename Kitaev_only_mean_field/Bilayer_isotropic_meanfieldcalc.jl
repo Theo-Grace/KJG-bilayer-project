@@ -638,6 +638,51 @@ function plot_oscillating_fields_vs_coupling(stored_mean_fields,marked_with_x,co
     end 
 end
 
+# This section adds functions to save the scan data to a file 
+function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max,K,J,G,tolerance,tol_drop_iteration=500)
+    
+    # sets the nearest neighbour vectors 
+    nx = (a1 - a2)/3
+    ny = (a1 + 2a2)/3
+    nz = -(2a1 + a2)/3
+
+    nn = [nx,ny,nz] # stores the nearest neighbours in a vector 
+
+    J_perp_list = collect(LinRange(J_perp_min,J_perp_max,Num_scan_points))
+
+    N=sqrt(2*length(half_BZ))
+
+    Description = "The parameters used in this run were K=$K J=$J G=$G. 
+    The Brillouin zone resolution parameter was N=$N.
+    The tolerance used when checking convergence was tol=10^(-$tolerance).
+    The number of J_perp values used was $Num_scan_points between $J_perp_min and $J_perp_max.
+    The signs of random fields were fixed.
+    Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
+    The marked_with_x_list is true for values of J_perp which were marked"
+
+    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points))
+    stored_mean_fields , marked_with_x = scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance, K,J,G,tol_drop_iteration)
+
+    group_name = "K=$K"*"_J=$J"*"_G=$G"*"_data"
+
+    fid = h5open("parameter_scan_data/J_perp_scans","cw")
+    it_num = 2
+    while group_name in keys(fid)
+        global group_name = group_name*"_$it_num"
+    end
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"output_mean_fields",stored_mean_fields)
+    write(g,"Description_of_run",Description)
+    write(g,"J_perp_list",J_perp_list)
+    write(g,"marked_with_x_list",marked_with_x)
+    close(fid)
+end
+
+
+
+
 # This section adds functions to check the code is converging correctly.
 function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
     """
