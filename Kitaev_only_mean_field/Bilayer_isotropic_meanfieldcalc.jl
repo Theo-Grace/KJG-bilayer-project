@@ -572,10 +572,11 @@ function scan_G_coupling(stored_mean_fields, half_BZ, nn,G_list,tolerance = 10.0
     xlab="\$\\Gamma\$/|K|"
 
     for (id,G) in enumerate(G_list)
+        stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
         stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
         plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id],title_str,xlab)
-        plot_mean_fields_check(stored_mean_fields[:,:,id],G_list[id],mark_with_x,K,J,J_perp,0,false)
+        #plot_mean_fields_check(stored_mean_fields[:,:,id],G_list[id],mark_with_x,K,J,J_perp,0,false)
         display(id)
     end
 
@@ -597,6 +598,7 @@ function scan_J_perp_coupling(stored_mean_fields, half_BZ, nn,J_perp_list,tolera
     xlab="\$J_{\\perp}\$/|K|"
 
     for (id,J_perp) in enumerate(J_perp_list)
+        stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
         stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
         plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_perp_list[1:id],title_str,xlab)
@@ -664,7 +666,7 @@ function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max
     Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
     The marked_with_x_list is true for values of J_perp which were marked"
 
-    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points),K,J,G,J_perp)
+    initial_mean_fields = 0.5*rand(8,8,Num_scan_points),K,J,G,J_perp
     stored_mean_fields , marked_with_x = scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance, K,J,G,tol_drop_iteration)
 
     group_name = "K=$K"*"_J=$J"*"_G=$G"*"_data"
@@ -705,7 +707,7 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
     Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
     The marked_with_x_list is true for values of J_perp which were marked"
 
-    initial_mean_fields = fix_signs(0.5*rand(8,8,Num_scan_points),K,J,G,J_perp)
+    initial_mean_fields = 0.5*rand(8,8,Num_scan_points)
     stored_mean_fields , marked_with_x = scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance, K,J,J_perp,tol_drop_iteration)
 
     group_name = "K=$K"*"_J=$J"*"_J_perp=$J_perp"*"_data"
@@ -725,7 +727,21 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
     close(fid)
 end
 
+function remove_marked_fields(stored_fields,coupling_list,marked_with_x)
+    marked_list = []
+    N = length(coupling_list)
+    for (id,mark_with_x) = enumerate(marked_with_x)
+        if mark_with_x == true
+            append!(marked_list , id)
+        end
+    end
 
+    correct_ids = setdiff(1:N,marked_list)
+
+    corrected_stored_fields = stored_fields[:,:,correct_ids]
+    corrected_coupling_list = coupling_list[correct_ids]
+    return corrected_stored_fields , corrected_coupling_list
+end
 
 
 
@@ -787,7 +803,7 @@ function fix_signs(random_fields,K,J,G,J_perp)
     for j = 1:4
         sign_fixing_mask[4+j,j,:] .= -1
     end
-
+   
     if G < 0 # Found that for G<0 need to have uG the same sign as uK for converging solution
         sign_fixing_mask[3,4,:] .=-1
         sign_fixing_mask[4,3,:] .=-1
@@ -824,3 +840,4 @@ function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,
         legend(["\$u_{ij}^0\$","\$u_{ij}^x\$","\$u_{ij}^y\$","\$ u_{ij}^{yz}\$","\$ u_{12}^x\$"])
     end
 end
+
