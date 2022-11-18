@@ -455,6 +455,8 @@ function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=-1,J=0,G=0,J_pe
 
     updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
 
+    display((real.(updated_mean_fields).>0.001).*real.(updated_mean_fields))
+
     return real.([ updated_mean_fields[1:4,5:8] updated_mean_fields[1:4,9:12] ; updated_mean_fields[5:8,13:16] updated_mean_fields[9:12,13:16] ])
 end
 
@@ -552,17 +554,21 @@ end
 
 
 # This section contains functions to do parameter scans 
-function scan_J_coupling(initial_mean_fields, half_BZ, nn,J_list,tolerance = 10.0, K=-1,G=0,J_perp=0)
+function scan_J_coupling(stored_mean_fields, half_BZ, nn,J_list,tolerance = 10.0, K=-1,G=0,J_perp=0,tol_drop_iteration=500)
     num_J_values = size(J_list)[1]
-    stored_mean_fields = zeros(8,8,num_J_values)
-    current_mean_fields = initial_mean_fields
+    marked_with_x = [false for _ in 1:num_J_values]
+    title_str = "Varying J with couplings K=$K \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp"
+    xlab="J/|K|"
+
     for (id,J) in enumerate(J_list)
-        stored_mean_fields[:,:,id] = run_bilayer_to_convergence(half_BZ,current_mean_fields,nn,tolerance,K,J,G,J_perp)
-        current_mean_fields = stored_mean_fields[:,:,id] + 0.00001*rand(8,8)
-        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id])
+        stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
+        stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
+        marked_with_x[id] = mark_with_x
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id],title_str,xlab)
+        plot_mean_fields_check(stored_mean_fields[:,:,id],J_list[id],mark_with_x,K,G,J_perp,0,false)
         display(id)
     end
-    return stored_mean_fields
+    return stored_mean_fields , marked_with_x
 end
 
 function scan_G_coupling(stored_mean_fields, half_BZ, nn,G_list,tolerance = 10.0, K=-1,J=0,J_perp=0,tol_drop_iteration=500)
@@ -575,7 +581,9 @@ function scan_G_coupling(stored_mean_fields, half_BZ, nn,G_list,tolerance = 10.0
         stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
         stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
-        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id],title_str,xlab)
+        if id%25 ==0 
+            plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],G_list[1:id],title_str,xlab)
+        end
         #plot_mean_fields_check(stored_mean_fields[:,:,id],G_list[id],mark_with_x,K,J,J_perp,0,false)
         display(id)
     end
@@ -662,14 +670,15 @@ function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max
     The Brillouin zone resolution parameter was N=$N.
     The tolerance used when checking convergence was tol=10^(-$tolerance).
     The number of J_perp values used was $Num_scan_points between $J_perp_min and $J_perp_max.
+    Each point was calculated from random initial fields.
     The signs of random fields were fixed.
     Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
     The marked_with_x_list is true for values of J_perp which were marked"
 
-    initial_mean_fields = 0.5*rand(8,8,Num_scan_points),K,J,G,J_perp
+    initial_mean_fields = 0.5*rand(8,8,Num_scan_points)
     stored_mean_fields , marked_with_x = scan_J_perp_coupling(initial_mean_fields, half_BZ, nn,J_perp_list,tolerance, K,J,G,tol_drop_iteration)
 
-    group_name = "K=$K"*"_J=$J"*"_G=$G"*"_data"
+    group_name = "K=$K"*"_J=$J"*"_G=$G"*"_J_perp=[$J_perp_min,$J_perp_max]_data"
 
     fid = h5open("parameter_scan_data/J_perp_scans","cw")
     it_num = 2
@@ -703,6 +712,7 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
     The Brillouin zone resolution parameter was N=$N.
     The tolerance used when checking convergence was tol=10^(-$tolerance).
     The number of J_perp values used was $Num_scan_points between $G_min and $G_max.
+    Each point was calculated from random initial fields.
     The signs of random fields were fixed.
     Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
     The marked_with_x_list is true for values of J_perp which were marked"
@@ -710,7 +720,7 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
     initial_mean_fields = 0.5*rand(8,8,Num_scan_points)
     stored_mean_fields , marked_with_x = scan_G_coupling(initial_mean_fields, half_BZ, nn,G_list,tolerance, K,J,J_perp,tol_drop_iteration)
 
-    group_name = "K=$K"*"_J=$J"*"_J_perp=$J_perp"*"_data"
+    group_name = "K=$K"*"_J=$J"*"_J_perp=$J_perp"*"_G=[$G_min,$G_max]_data"
 
     fid = h5open("parameter_scan_data/G_scans","cw")
     it_num = 2
@@ -723,6 +733,48 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
     write(g,"output_mean_fields",stored_mean_fields)
     write(g,"Description_of_run",Description)
     write(g,"G_list",G_list)
+    write(g,"marked_with_x_list",marked_with_x)
+    close(fid)
+end
+
+function J_scan_and_save_data(half_BZ,Num_scan_points,J_min,J_max,K,G,J_perp,tolerance,tol_drop_iteration=500)
+    
+    # sets the nearest neighbour vectors 
+    nx = (a1 - a2)/3
+    ny = (a1 + 2a2)/3
+    nz = -(2a1 + a2)/3
+
+    nn = [nx,ny,nz] # stores the nearest neighbours in a vector 
+
+    J_list = collect(LinRange(J_min,J_max,Num_scan_points))
+
+    N=sqrt(2*length(half_BZ))
+
+    Description = "The parameters used in this run were K=$K G=$G J_perp=$J_perp. 
+    The Brillouin zone resolution parameter was N=$N.
+    The tolerance used when checking convergence was tol=10^(-$tolerance).
+    The number of J_perp values used was $Num_scan_points between $J_min and $J_max.
+    Each point was calculated from random initial fields.
+    The signs of random fields were fixed.
+    Points marked x were either oscillating solutions or ran for over $tol_drop_iteration iterations and were calculated with higher tolerance.
+    The marked_with_x_list is true for values of J_perp which were marked"
+
+    initial_mean_fields = 0.5*rand(8,8,Num_scan_points)
+    stored_mean_fields , marked_with_x = scan_J_coupling(initial_mean_fields, half_BZ, nn,J_list,tolerance, K,G,J_perp,tol_drop_iteration)
+
+    group_name = "K=$K"*"_G=$G"*"_J_perp=$J_perp"*"_J=[$J_min,$J_max]_data"
+
+    fid = h5open("parameter_scan_data/J_scans","cw")
+    it_num = 2
+    while group_name in keys(fid)
+        global group_name = group_name*"_$it_num"
+    end
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"output_mean_fields",stored_mean_fields)
+    write(g,"Description_of_run",Description)
+    write(g,"J_list",J_list)
     write(g,"marked_with_x_list",marked_with_x)
     close(fid)
 end
@@ -810,6 +862,13 @@ function fix_signs(random_fields,K,J,G,J_perp)
         sign_fixing_mask[7,8,:] .=-1
         sign_fixing_mask[8,7,:] .=-1
     end 
+
+    if J < 0 # Found that negative J need to have uJ same sign as uK to converge 
+        for j = 1:2
+            sign_fixing_mask[2+j,2+j,:] .= -1
+            sign_fixing_mask[6+j,6+j,:] .= -1
+        end
+    end
 
     return sign_fixing_mask.*random_fields
 end
