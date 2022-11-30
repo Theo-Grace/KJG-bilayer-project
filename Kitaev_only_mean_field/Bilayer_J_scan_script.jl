@@ -13,15 +13,15 @@ half_BZ = brillouinzone(g1,g2,N,true)
 
 # This section sets the run parameters 
 K = -1
-J = 0
+G = 2
 tolerance = 6.0
 tol_drop_iteration = 750
 
-Num_scan_points = 125
-J_min = 0
-J_max = 1.25
+Num_scan_points = 400
+J_min = -2
+J_max = 2
 
-J_perp_list = [0.3]
+J_perp_list = [0.5]
 for J_perp in J_perp_list 
     J_scan_and_save_data(half_BZ,Num_scan_points,J_min,J_max,K,G,J_perp,tolerance,tol_drop_iteration)
     display("completed for J_perp=$J_perp")

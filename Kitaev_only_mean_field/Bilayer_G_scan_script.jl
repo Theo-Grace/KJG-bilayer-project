@@ -13,15 +13,19 @@ half_BZ = brillouinzone(g1,g2,N,true)
 
 # This section sets the run parameters 
 K = -1
-J = 0
+J = 0.3
 tolerance = 6.0
-tol_drop_iteration = 500
+tol_drop_iteration = 750
 
-Num_scan_points = 400 
+Num_scan_points = 400
 G_min = -2
 G_max = 2
 
-J_perp_list = [0.4,0.5,0.6]
+# Interesting transition occurs at J_perp = 0.11750 0.1167 for G~0.50285 and J_perp = 0.01923 for G~0.50865
+# The transition depends sensitively on G. For G~0.5086298455 it occurs at J_perp ~0.008-9
+
+
+J_perp_list = [0]
 for J_perp in J_perp_list 
     G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tolerance,tol_drop_iteration)
     display("completed for J_perp=$J_perp")
