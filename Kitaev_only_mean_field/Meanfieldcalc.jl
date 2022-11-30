@@ -409,7 +409,7 @@ function plot_bands_G_to_K(BZ,bandstructure,bilayer=false)
     for i in 1:num_majoranas
         plot(kGtoK,bands_GtoK[i],color="black")
     end
-    title("\$\\Gamma=-0.\$ J=-0.2 between \$\\Gamma\$ and \$ K \$ points")
+    title( "Between \$\\Gamma\$ and \$ K \$ points")
     ylabel("Energy")
     xlabel("Wavevector")
 
@@ -545,16 +545,22 @@ function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=-[1,1,1],J=0,G=
     Num_unit_cells = 2*length(half_BZ)
     updated_mean_fields = zeros(Complex{Float64},16,16,3)
     H_inter = Hamiltonian_interlayer(old_mean_fields,J_perp)
+    
 
     for k in half_BZ
         H = Hamiltonian_intralayer(old_mean_fields,k,nn,K,J,G) + H_inter
-        U , occupancymatrix = diagonalise(H)
+        U , occupancymatrix = diagonalise(H,0.001)
+        if any(isnan,occupancymatrix)
+            display("NaN value in occupancymatrix for k=$k")
+        elseif any(isnan, U)
+            display("NaN value in occupancymatrix for k=$k")
+        end
+
         for alpha = 1:3
             updated_mean_fields[:,:,alpha] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[alpha])
             updated_mean_fields[:,:,alpha] -= (Fourier_bilayer(U*occupancymatrix*U',-k,nn[alpha]))
         end
     end
-
     updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
 
     return updated_mean_fields
@@ -580,6 +586,7 @@ function run_bilayer_to_convergence(half_BZ,initial_mean_fields,nn,tolerance=10.
     tol = 10^(-tolerance)
     it_num = 0 
     not_converged = true
+    
     while not_converged
         new_mean_fields = update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K,J,G,J_perp)
         diff= abs.(real.(new_mean_fields-old_mean_fields))
