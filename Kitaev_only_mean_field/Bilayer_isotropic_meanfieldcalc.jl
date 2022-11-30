@@ -5,7 +5,7 @@ ASSUMPTIONS:
 - Isotropic couplings (all bond types equivalent)
 
 =#
-
+using HDF5
 using LinearAlgebra
 using PyPlot # This is the library used for plotting 
 pygui(true) # This changes the plot backend from julia default to allow plots to be displayed
@@ -449,13 +449,11 @@ function update_bilayer_mean_fields(half_BZ,old_mean_fields,nn,K=-1,J=0,G=0,J_pe
         U , occupancymatrix = diagonalise(H)
     
         updated_mean_fields[:,:] += Fourier_bilayer(transpose(U')*occupancymatrix*transpose(U),k,nn[1])
-        updated_mean_fields[:,:] -= (Fourier_bilayer(U*occupancymatrix*U',-k,nn[1]))
+        updated_mean_fields[:,:] += conj(Fourier_bilayer(U*occupancymatrix*U',-k,nn[1])) # I changed this from a - sign to a + conj 
     
     end
 
     updated_mean_fields = (im.*updated_mean_fields)./Num_unit_cells
-
-    display((real.(updated_mean_fields).>0.001).*real.(updated_mean_fields))
 
     return real.([ updated_mean_fields[1:4,5:8] updated_mean_fields[1:4,9:12] ; updated_mean_fields[5:8,13:16] updated_mean_fields[9:12,13:16] ])
 end
@@ -564,8 +562,8 @@ function scan_J_coupling(stored_mean_fields, half_BZ, nn,J_list,tolerance = 10.0
         stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
         stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
-        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id],title_str,xlab)
-        plot_mean_fields_check(stored_mean_fields[:,:,id],J_list[id],mark_with_x,K,G,J_perp,0,false)
+        #plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id],title_str,xlab)
+        #plot_mean_fields_check(stored_mean_fields[:,:,id],J_list[id],mark_with_x,K,G,J_perp,0,false)
         display(id)
     end
     return stored_mean_fields , marked_with_x
@@ -870,6 +868,35 @@ function fix_signs(random_fields,K,J,G,J_perp)
         end
     end
 
+    if J>1
+        sign_fixing_mask[2,2,:] .= 1
+        sign_fixing_mask[6,6,:] .= 1
+    end
+
+    #This section fixes the signs for the KJG model with J>0 G>0 J_perp>0 
+    for beta = [1,2,3]
+        for gamma = setdiff([1,2,3],beta)
+            sign_fixing_mask[1+beta,5+gamma,:].=-1
+        end
+    end
+
+    for j = 1:2
+        sign_fixing_mask[2,2+j,:].=-1
+        sign_fixing_mask[2+j,2,:].=-1
+        sign_fixing_mask[6,6+j,:].=-1
+        sign_fixing_mask[6+j,6,:].=-1
+    end
+
+    # This section suppresses the solutions involving mixed gauge and matter sector, which give oscillatory solutions for J>0.
+    if J> 0.3
+        for j = [1,3]
+            sign_fixing_mask[1,1+j,:].=-1
+            sign_fixing_mask[5,5+j,:].=-1
+        end  
+        sign_fixing_mask[3,1,:].=-1  
+        sign_fixing_mask[7,5,:].=-1
+    end
+
     return sign_fixing_mask.*random_fields
 end
 
@@ -900,3 +927,53 @@ function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,
     end
 end
 
+# This section adds functions to read stored data from a HDF5 filefunction read_stored_data(scan_type)
+function read_stored_data(scan_type)
+    """
+    Reads data stored in a HDF5 file.
+    Each type of parameter scan (J,G,J_perp) has it's own HDF5 file. 
+    Takes:
+    - scan_type as an argument which can only be "J" "G" or "J_perp" which must be entered as a string 
+    Returns:
+    - The mean fields from the final read. 
+    - Plots the parameter scan *corrected* fields meaning that any x marked points are removed. The x marks are plotted seperately. 
+    """
+    doc_name = "parameter_scan_data/"*scan_type*"_scans"
+    display(doc_name)
+    
+    fid = h5open(doc_name,"r")
+    show(stdout,"text/plain",keys(fid))
+
+    read_another=true
+
+    while read_another == true
+        println("Which file do you want to read? Copy the file name. Type N to quit") 
+        group_name = readline()
+
+        if group_name == "N"
+            break
+        end
+
+        while !(group_name in keys(fid))
+            println("Not found, try again.")
+            group_name = readline()
+        end
+
+        g = fid[group_name]
+
+        read_fields = read(g["output_mean_fields"])
+        read_description = read(g["Description_of_run"])
+        read_coupling_list = read(g[scan_type*"_list"])
+        read_marked_with_x = read(g["marked_with_x_list"])
+
+        title_str = "Varying "*scan_type*" with "*group_name[1:4]*" "*group_name[6:8]*" "*group_name[10:end-5]
+        xlab = scan_type*" /|K|"
+
+        corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
+        plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
+        #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+    end 
+    close(fid)
+
+    return read_fields , read_description , read_coupling_list , read_marked_with_x 
+end
