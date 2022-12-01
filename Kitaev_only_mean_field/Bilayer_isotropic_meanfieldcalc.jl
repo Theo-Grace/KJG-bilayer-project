@@ -927,6 +927,54 @@ function plot_mean_fields_check(stored_mean_fields,check_list,mark_with_x,K,J,G,
     end
 end
 
+function check_brillouinzone_size(num_checks,tolerance,K,J,G,J_perp)
+    """
+    This function repeatedly calculates the mean fields at a fixed point in parameter space, but varies the size of the Brillouin zone used to calculate the fields.
+    The Brillouin zone size parameter N increases by 2 with each iteration, starting from 2 and finishing at 2*num_checks.
+    The mean of the last 5 sets of mean fields is taken. The deviation in mean fields is then plotted against the BZ size parameter N. 
+    This may be used to estimate the uncertainty in mean fields due to the finite number of k points sampled. 
+    """
+
+    stored_fields = 0.5*rand(8,8,num_checks)
+    stored_fields = fix_signs(stored_fields,K,J,G,J_perp)
+
+    for j = (1:num_checks)
+
+        N=2j
+        current_half_BZ = brillouinzone(g1,g2,N,true)
+
+        stored_fields[:,:,j] , mark_with_x = run_bilayer_to_convergence(current_half_BZ,stored_fields[:,:,j],nn,tolerance,K,J,G,J_perp)
+
+        #plot_mean_fields_check(stored_fields[:,:,j],j,mark_with_x,K,J,G,J_perp)
+        
+        display(stored_fields[:,:,j])
+    end
+
+    mean_stored_fields = zeros(8,8,num_checks)
+    for n = 1:num_checks
+        mean_stored_fields[:,:,n] = sum(stored_fields[:,:,end-4:end],dims=3)/(5)
+    end 
+    plot_mean_fields_check(stored_fields-mean_stored_fields,2*(1:num_checks),false,K,J,G,J_perp)
+    xlabel("Sqrt of number of points in Brillouin zone")
+    ylabel("deviation from mean value")
+end
+
+function compare_brillouinzone_size(N1,N2,tolerance,K,J,G,J_perp)
+    """
+    Calculates two sets of mean fields at the same point in parameter space, but using two different sizes of Brillouin zone, with the number of points being N1^2 and N2^2.
+    The difference in mean fields is then displayed and returned.  
+    """
+    half_BZ_1 = brillouinzone(g1,g2,N1)
+    half_BZ_2 = brillouinzone(g1,g2,N2)
+
+    mean_fields_1 , mark_with_x = run_bilayer_to_convergence(half_BZ_1,fix_signs(0.5*rand(8,8),K,J,G,J_perp),nn,tolerance,K,J,G,J_perp)
+    mean_fields_2 , mark_with_x = run_bilayer_to_convergence(half_BZ_2,fix_signs(0.5*rand(8,8),K,J,G,J_perp),nn,tolerance,K,J,G,J_perp)
+
+    display(mean_fields_1-mean_fields_2)
+
+    return mean_fields_1 - mean_fields_2
+end
+
 # This section adds functions to read stored data from a HDF5 filefunction read_stored_data(scan_type)
 function read_stored_data(scan_type)
     """
