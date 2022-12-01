@@ -678,7 +678,7 @@ function J_perp_scan_and_save_data(half_BZ,Num_scan_points,J_perp_min,J_perp_max
 
     group_name = "K=$K"*"_J=$J"*"_G=$G"*"_J_perp=[$J_perp_min,$J_perp_max]_data"
 
-    fid = h5open("parameter_scan_data/J_perp_scans","cw")
+    fid = h5open("C:\\Users\\TheoG\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\J_perp_scans","cw")
     it_num = 2
     while group_name in keys(fid)
         global group_name = group_name*"_$it_num"
@@ -720,7 +720,7 @@ function G_scan_and_save_data(half_BZ,Num_scan_points,G_min,G_max,K,J,J_perp,tol
 
     group_name = "K=$K"*"_J=$J"*"_J_perp=$J_perp"*"_G=[$G_min,$G_max]_data"
 
-    fid = h5open("parameter_scan_data/G_scans","cw")
+    fid = h5open("C:\\Users\\TheoG\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\G_scans","cw")
     it_num = 2
     while group_name in keys(fid)
         global group_name = group_name*"_$it_num"
@@ -762,7 +762,7 @@ function J_scan_and_save_data(half_BZ,Num_scan_points,J_min,J_max,K,G,J_perp,tol
 
     group_name = "K=$K"*"_G=$G"*"_J_perp=$J_perp"*"_J=[$J_min,$J_max]_data"
 
-    fid = h5open("parameter_scan_data/J_scans","cw")
+    fid = h5open("C:\\Users\\TheoG\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\J_scans","cw")
     it_num = 2
     while group_name in keys(fid)
         global group_name = group_name*"_$it_num"
@@ -938,7 +938,7 @@ function read_stored_data(scan_type)
     - The mean fields from the final read. 
     - Plots the parameter scan *corrected* fields meaning that any x marked points are removed. The x marks are plotted seperately. 
     """
-    doc_name = "parameter_scan_data/"*scan_type*"_scans"
+    doc_name = "C:\\Users\\TheoG\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
     display(doc_name)
     
     fid = h5open(doc_name,"r")
