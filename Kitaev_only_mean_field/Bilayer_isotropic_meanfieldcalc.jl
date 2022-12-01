@@ -994,6 +994,7 @@ function read_stored_data(scan_type)
 
     read_another=true
 
+
     while read_another == true
         println("Which file do you want to read? Copy the file name. Type N to quit") 
         group_name = readline()
@@ -1009,10 +1010,10 @@ function read_stored_data(scan_type)
 
         g = fid[group_name]
 
-        read_fields = read(g["output_mean_fields"])
-        read_description = read(g["Description_of_run"])
-        read_coupling_list = read(g[scan_type*"_list"])
-        read_marked_with_x = read(g["marked_with_x_list"])
+        global read_fields = read(g["output_mean_fields"])
+        global read_description = read(g["Description_of_run"])
+        global read_coupling_list = read(g[scan_type*"_list"])
+        global read_marked_with_x = read(g["marked_with_x_list"])
 
         title_str = "Varying "*scan_type*" with "*group_name[1:4]*" "*group_name[6:8]*" "*group_name[10:end-5]
         xlab = scan_type*" /|K|"
@@ -1021,6 +1022,7 @@ function read_stored_data(scan_type)
         plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
         #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
     end 
+
     close(fid)
 
     return read_fields , read_description , read_coupling_list , read_marked_with_x 
