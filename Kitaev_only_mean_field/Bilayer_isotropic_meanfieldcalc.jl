@@ -81,6 +81,7 @@ N = 24
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
+Large_BZ = brillouinzone(g1,g2,100,false)
 
 mean_fields = [-1 0 0 0 ; 0 1 0 0 ; 0 0 0.5 0.25 ; 0 0 0.25 0.5] + 0.01*rand(4,4)
 
@@ -302,7 +303,7 @@ function get_bandstructure(BZ,mean_fields,nn,K=-1,J=0,G=0)
     return bandstructure
 end
 
-function plot_bands_G_to_K(BZ,bandstructure,bilayer=false)
+function plot_bands_G_to_K(BZ,bandstructure,axes,bilayer=false)
     """
     This plots the bands along the direction between Gamma and M points in the Brillouin Zone
     This requires:
@@ -326,18 +327,25 @@ function plot_bands_G_to_K(BZ,bandstructure,bilayer=false)
             end
         end 
     end 
-    kGtoK = (1:length(GtoK))*(g1[1]+g2[1])/(2*length(GtoK))
+    kGtoK = collect((1:length(GtoK))*(g1[1]+g2[1])/(2*length(GtoK)))
+    kGtoK = kGtoK .- 0.5*kGtoK[length(GtoK)]*ones(1,length(GtoK))
+
     for i in 1:num_majoranas
-        plot(kGtoK,bands_GtoK[i],color="black")
+        axes.plot(kGtoK,bands_GtoK[i],color="black")
     end
+
+    #=
     title( "Between \$\\Gamma\$ and \$ K \$ points")
     ylabel("Energy")
     xlabel("Wavevector")
-
+    =#
+    
     #This section sets x,y axis limits to make easier comparison to results from "Dynamics of QSL beyond integrability, J. Knolle et al"
+    #=
     ax = gca()
     ax[:set_xlim]([3.14,5.3])
     ax[:set_ylim]([0,1])
+    =#
 end
 
 function plot_bands_G_to_M(BZ,bandstructure)
@@ -373,7 +381,7 @@ function converge_and_plot(BZ,half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1
     """
     final_mean_fields = run_to_convergence(half_BZ,initial_mean_fields,nn,tolerance,K,J,G)
     bandstructure = get_bandstructure(BZ,final_mean_fields,nn,K,J,G)
-    plot_bands_G_to_K(BZ,bandstructure)
+    plot_bands_G_to_K(BZ,bandstructure,gca())
     return final_mean_fields
 end
 
@@ -522,7 +530,7 @@ function get_bilayer_bandstructure(BZ,mean_fields,nn,K=-1,J=0,G=0,J_perp=0)
     """
     takes:
     - The BZ as a matrix of k vectors
-    - an 16x16x3 matrix of mean fields mean_fields 
+    - an 8x8 matrix of mean fields mean_fields 
     - nearest neighbour vectors in a vector nn
     - Kitaev coupling parameters as a vector K
     - Heisenberg coupling J as a scalar
@@ -1027,3 +1035,222 @@ function read_stored_data(scan_type)
 
     return read_fields , read_description , read_coupling_list , read_marked_with_x 
 end
+
+function plot_bandstructure_from_stored_data(scan_type,BZ)
+    doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
+    display(doc_name)
+    
+    fid = h5open(doc_name,"r")
+    show(stdout,"text/plain",keys(fid))
+
+    println("Which file do you want to read? Copy the file name. Type N to quit") 
+    group_name = readline()
+
+    while !(group_name in keys(fid))
+        println("Not found, try again.")
+        group_name = readline()
+    end
+
+    g = fid[group_name]
+
+    read_fields = read(g["output_mean_fields"])
+    read_description = read(g["Description_of_run"])
+    read_coupling_list = read(g[scan_type*"_list"])
+    read_marked_with_x = read(g["marked_with_x_list"])
+
+    title_str = "Varying "*scan_type*" with "*group_name[1:4]*" "*group_name[6:8]*" "*group_name[10:end-5]
+    xlab = scan_type*" /|K|"
+
+    corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
+    plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
+    #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+
+    Num_points = length(read_coupling_list)
+    min_parameter = read_coupling_list[1]
+    max_parameter = read_coupling_list[end]
+    parameter_range = max_parameter - min_parameter
+    parameter_resolution = parameter_range/Num_points
+
+    println("What parameter value do you want to plot the band structure for?")
+    parameter = parse(Float64,readline()) 
+
+    parameter_id = Int(round(((parameter - min_parameter)/parameter_range)*Num_points))
+
+    fixed_parameters = setdiff(["K","J","G","J_perp"],[scan_type])
+
+    if scan_type == "J"
+        J = read_coupling_list[parameter_id]
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "G"
+        G = read_coupling_list[parameter_id]
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "J_perp"
+        J_perp = read_coupling_list[parameter_id]
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+    end 
+
+    mean_fields = read_fields[:,:,parameter_id]
+
+    bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
+    PyPlot.figure()
+    plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+
+    J=round(J,digits=3)
+    G=round(G,digits=3)
+    J_perp=round(J_perp,digits=3)
+    title("Bands along \$\\Gamma\$ to K direction, K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
+
+
+    println("Plot another? Give a new "*scan_type*" value. Type N to quit")
+    input = readline()
+    while input != "N"
+        parameter = parse(Float64,input) 
+        parameter_id = Int(round(((parameter - min_parameter)/parameter_range)*Num_points))
+
+        while parameter_id <= 0 || parameter_id >= Num_points
+            println("That's outside the "*scan_type*" range. Try again:")
+            parameter = parse(Float64,readline())
+            parameter_id = Int(round(((parameter - min_parameter)/parameter_range)*Num_points)) 
+        end 
+
+
+        if scan_type == "J"
+            J = read_coupling_list[parameter_id]
+        elseif scan_type == "G"
+            G = read_coupling_list[parameter_id]
+        elseif scan_type == "J_perp"
+            J_perp = read_coupling_list[parameter_id]
+        end
+
+        mean_fields = read_fields[:,:,parameter_id]
+
+        bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
+        PyPlot.figure()
+        plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+
+        J=round(J,digits=3)
+        G=round(G,digits=3)
+        J_perp=round(J_perp,digits=3)
+        title("Bands along \$\\Gamma\$ to K direction, K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
+
+        println("Plot another? Give a new "*scan_type*" value. Type N to quit")
+        input = readline()
+    end
+end 
+
+function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num_columns)
+    doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
+    display(doc_name)
+    
+    fid = h5open(doc_name,"r")
+    show(stdout,"text/plain",keys(fid))
+
+    println("Which file do you want to read? Copy the file name. Type N to quit") 
+    group_name = readline()
+
+    while !(group_name in keys(fid))
+        println("Not found, try again.")
+        group_name = readline()
+    end
+
+    g = fid[group_name]
+
+    read_fields = read(g["output_mean_fields"])
+    read_description = read(g["Description_of_run"])
+    read_coupling_list = read(g[scan_type*"_list"])
+    read_marked_with_x = read(g["marked_with_x_list"])
+
+    title_str = "Varying "*scan_type*" with "*group_name[1:4]*" "*group_name[6:8]*" "*group_name[10:end-5]
+    xlab = scan_type*" /|K|"
+
+    fig = PyPlot.figure()
+    subfigs = fig.subfigures(1,2)
+
+    axsLeft = subfigs[1].subplots()
+    corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
+    plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
+    #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+
+    PyPlot.show()
+
+    Num_points = length(read_coupling_list)
+    min_parameter = read_coupling_list[1]
+    max_parameter = read_coupling_list[end]
+    parameter_range = max_parameter - min_parameter
+    parameter_resolution = parameter_range/Num_points
+    fixed_parameters = setdiff(["K","J","G","J_perp"],[scan_type])
+
+    if scan_type == "J"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "G"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "J_perp"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+    end 
+
+    axsRight = subfigs[2].subplots(num_rows,num_columns, sharex=true, sharey= true)
+    subfigs[2].suptitle("Majorana bands along \$\\Gamma\$-K direction")
+
+    for row = 1:num_rows
+        for column = 1:num_columns
+            println("What parameter value do you want to plot the band structure for?")
+            parameter = parse(Float64,readline()) 
+
+            if parameter == "N"
+                break
+            end
+            parameter_id = Int(round(((parameter - min_parameter)/parameter_range)*Num_points))
+
+            while parameter_id <= 0 || parameter_id >= Num_points
+                println("That's outside the "*scan_type*" range. Try again:")
+                parameter = parse(Float64,readline())
+                parameter_id = Int(round(((parameter - min_parameter)/parameter_range)*Num_points)) 
+            end 
+
+            ax = axsRight[row,column]
+
+            if column == 1
+                ax.set_ylabel("Energy")
+            end
+            if row == num_rows
+                ax.set_xlabel("Wavevector")
+            end
+
+            if scan_type == "J"
+                J = read_coupling_list[parameter_id]
+                J_round=round(J,digits=3)
+                ax.set_title("J=$J_round")
+            elseif scan_type == "G"
+                G = read_coupling_list[parameter_id]
+                G_round=round(G,digits=3)
+                ax.set_title("G=$G_round")
+            elseif scan_type == "J_perp"
+                J_perp = read_coupling_list[parameter_id]
+                J_perp_round=round(J_perp,digits=3)
+                ax.set_title("J_perp=$J_perp_round")
+            end
+
+            mean_fields = read_fields[:,:,parameter_id]
+
+            bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
+            plot_bands_G_to_K(BZ,bandstructure,ax,true)
+    
+            PyPlot.show()
+        end
+    end
+end 
+
+    
+
