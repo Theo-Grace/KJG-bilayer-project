@@ -570,8 +570,8 @@ function scan_J_coupling(stored_mean_fields, half_BZ, nn,J_list,tolerance = 10.0
         stored_mean_fields[:,:,id] = fix_signs(stored_mean_fields[:,:,id],K,J,G,J_perp)
         stored_mean_fields[:,:,id] , mark_with_x = run_bilayer_to_convergence(half_BZ,stored_mean_fields[:,:,id],nn,tolerance,K,J,G,J_perp,tol_drop_iteration)
         marked_with_x[id] = mark_with_x
-        #plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id],title_str,xlab)
-        #plot_mean_fields_check(stored_mean_fields[:,:,id],J_list[id],mark_with_x,K,G,J_perp,0,false)
+        plot_mean_fields_vs_coupling(stored_mean_fields[:,:,1:id],J_list[1:id],title_str,xlab)
+        plot_mean_fields_check(stored_mean_fields[:,:,id],J_list[id],mark_with_x,K,G,J_perp,0,false)
         display(id)
     end
     return stored_mean_fields , marked_with_x
@@ -809,7 +809,7 @@ function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
     This generates a set of N=num_checks random 8x8 mean field matrices and then then iterates each one to convergence and plots the resulting mean fields as a scatter plot. This allows you to check the distribution of outputs,
     and check that the code is converging consistently. 
     """
-    stored_fields = 0.5*rand(8,8,num_checks)
+    stored_fields = 0.5*randn(8,8,num_checks)
     
     #=
     # This fixes the signs to be consistent with the Kitaev exact solution
@@ -836,7 +836,7 @@ function check_random_inputs(num_checks,half_BZ,tolerance,K,J,G,J_perp)
     stored_fields[8,8,:] = abs.(stored_fields[8,8,:])
     =#
 
-    stored_fields = fix_signs(stored_fields,K,J,G,J_perp)
+    #stored_fields = fix_signs(stored_fields,K,J,G,J_perp)
 
     check_list = 1:num_checks
     for N in check_list
@@ -962,9 +962,9 @@ function check_brillouinzone_size(num_checks,tolerance,K,J,G,J_perp)
     for n = 1:num_checks
         mean_stored_fields[:,:,n] = sum(stored_fields[:,:,end-4:end],dims=3)/(5)
     end 
-    plot_mean_fields_check(stored_fields-mean_stored_fields,2*(1:num_checks),false,K,J,G,J_perp)
+    plot_mean_fields_check((stored_fields-mean_stored_fields)./mean_stored_fields,2*(1:num_checks),false,K,J,G,J_perp)
     xlabel("Sqrt of number of points in Brillouin zone")
-    ylabel("deviation from mean value")
+    ylabel("relative deviation from mean value")
 end
 
 function compare_brillouinzone_size(N1,N2,tolerance,K,J,G,J_perp)
@@ -1028,7 +1028,7 @@ function read_stored_data(scan_type)
 
         corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
         plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
-        #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+        plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
     end 
 
     close(fid)
@@ -1036,7 +1036,19 @@ function read_stored_data(scan_type)
     return read_fields , read_description , read_coupling_list , read_marked_with_x 
 end
 
-function plot_bandstructure_from_stored_data(scan_type,BZ)
+function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percentage_error=10^-3)
+    """
+    Plots bandstructures using mean field data stored in a file.
+    Takes:
+    - scan_type which can be "J","G" or "J_perp" entered as a string 
+    - BZ which is a Brillouin zone used to plot the bandstructure. This may not be the same Brillouin zone used to calculate the mean fields, but the uncertainty in the mean fields due to finite sample size should be kept in mind. 
+   
+   
+    - After choosing a file this produces a plot of mean fields vs parameter. 
+    - Then a prompt asks for a parameter value from the range plotted that you want to plot the bandstructure for.
+    - The bandstructure is plotted in a new window
+    - Mulitple bandstructures can be plotted from a single file, but each bandstructure is plotted in a seperate window.
+    """
     doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
     display(doc_name)
     
@@ -1101,6 +1113,13 @@ function plot_bandstructure_from_stored_data(scan_type,BZ)
     PyPlot.figure()
     plot_bands_G_to_K(BZ,bandstructure,gca(),true)
 
+    if num_repeats > 0 
+        for j = 1:num_repeats
+            uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp,percentage_error)
+            println(j)
+        end
+    end
+
     J=round(J,digits=3)
     G=round(G,digits=3)
     J_perp=round(J_perp,digits=3)
@@ -1134,6 +1153,13 @@ function plot_bandstructure_from_stored_data(scan_type,BZ)
         PyPlot.figure()
         plot_bands_G_to_K(BZ,bandstructure,gca(),true)
 
+        if num_repeats > 0 
+            for j = 1:num_repeats
+                uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp,percentage_error)
+                println(j)
+            end
+        end
+
         J=round(J,digits=3)
         G=round(G,digits=3)
         J_perp=round(J_perp,digits=3)
@@ -1145,6 +1171,10 @@ function plot_bandstructure_from_stored_data(scan_type,BZ)
 end 
 
 function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num_columns)
+    """
+    Used to plot a parameter scan alongside a num_rows x num_columns grid of plots of Majorana bandstructures for different points in parameter space.
+    Reads stored scan data from shared OneDrive file and plots mean fields vs couplings. Then asks for parameter values and plots bandstructures for those values. 
+    """
     doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
     display(doc_name)
     
@@ -1252,5 +1282,8 @@ function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num
     end
 end 
 
-    
-
+function uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp, error=10^(-5))
+    uncertain_mean_fields = (ones(8,8)+error*randn(8,8)).*mean_fields
+    bandstructure = get_bilayer_bandstructure(BZ,uncertain_mean_fields,nn,K,J,G,J_perp)
+    plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+end 
