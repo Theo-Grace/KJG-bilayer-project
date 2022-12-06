@@ -374,6 +374,58 @@ function plot_bands_G_to_M(BZ,bandstructure)
     #legend(["matter","gauge","gauge","gauge","gauge","gauge","gauge","matter"])
 end
 
+function plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,axes)
+
+    num_majoranas=16
+    GtoKtoMtoG = []
+    GtoM = []
+    bands_GtoKtoMtoG = [[] for i = 1:num_majoranas]
+    bands_GtoM = [[] for i = 1:num_majoranas]
+    K_index=0
+    for k in BZ 
+        if (k[2] == 0) && k[1] >=0
+            push!(GtoKtoMtoG,k)
+            for i in 1:num_majoranas
+                push!(bands_GtoKtoMtoG[i],bandstructure[k][i])
+            end
+            if k[1] >= (g1[1]+g2[1])/3 && K_index == 0
+                K_index = length(GtoKtoMtoG)
+            end
+
+        elseif (k[1]==0) && k[2] >=0
+            push!(GtoM,k)
+            for i in 1:num_majoranas
+                push!(bands_GtoM[i],bandstructure[k][i])
+            end
+        end
+    end 
+
+    kGtoKtoMtoG = collect((1:length(GtoKtoMtoG))*(g1[1]+g2[1])/(2*length(GtoKtoMtoG)))
+    kGtoM = collect((1:length(GtoM))*(g1[2]-g2[2])/(2*length(GtoM))) .+ ones(length(GtoM),1)*kGtoKtoMtoG[end]
+
+    display(size(kGtoM))
+    M_index = length(GtoKtoMtoG)
+
+    append!(kGtoKtoMtoG,kGtoM)
+    for i =1:num_majoranas
+        append!(bands_GtoKtoMtoG[i],(bands_GtoM[i]))
+    end 
+
+    E_max = 0
+    for i in 1:num_majoranas
+        if E_max < maximum(bands_GtoKtoMtoG[i]) 
+            E_max = maximum(bands_GtoKtoMtoG[i])
+        end
+        axes.plot(kGtoKtoMtoG,bands_GtoKtoMtoG[i],color="black")
+    end
+
+    
+    axes.set_xticks([kGtoKtoMtoG[1],kGtoKtoMtoG[K_index],kGtoKtoMtoG[M_index],kGtoKtoMtoG[length(kGtoKtoMtoG)]])
+    axes.set_xticklabels(["\$\\Gamma\$","K","M","\$\\Gamma\$"])
+    axes.set_ylabel("Energy")
+    axes.vlines([kGtoKtoMtoG[1],kGtoKtoMtoG[K_index],kGtoKtoMtoG[M_index],kGtoKtoMtoG[length(kGtoKtoMtoG)]],-(1.1*E_max),1.1*E_max,linestyle="dashed")
+end
+
 function converge_and_plot(BZ,half_BZ,initial_mean_fields,nn,tolerance=10.0,K=-1,J=0,G=0)
     """
     Combines functions to allow you to calculate final fields and plot the bands at once 
@@ -1111,7 +1163,7 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
 
     bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
     PyPlot.figure()
-    plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+    plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,gca())
 
     if num_repeats > 0 
         for j = 1:num_repeats
@@ -1123,7 +1175,7 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
     J=round(J,digits=3)
     G=round(G,digits=3)
     J_perp=round(J_perp,digits=3)
-    title("Bands along \$\\Gamma\$ to K direction, K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
+    title("Bandstructure for K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
 
 
     println("Plot another? Give a new "*scan_type*" value. Type N to quit")
@@ -1151,7 +1203,7 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
 
         bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
         PyPlot.figure()
-        plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+        plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,gca())
 
         if num_repeats > 0 
             for j = 1:num_repeats
@@ -1163,7 +1215,7 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
         J=round(J,digits=3)
         G=round(G,digits=3)
         J_perp=round(J_perp,digits=3)
-        title("Bands along \$\\Gamma\$ to K direction, K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
+        title("Bandstructure for K=$K J=$J \$\\Gamma\$=$G \$J_{\\perp}\$=$J_perp")
 
         println("Plot another? Give a new "*scan_type*" value. Type N to quit")
         input = readline()
@@ -1231,7 +1283,7 @@ function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num
     end 
 
     axsRight = subfigs[2].subplots(num_rows,num_columns, sharex=true, sharey= true)
-    subfigs[2].suptitle("Majorana bands along \$\\Gamma\$-K direction")
+    subfigs[2].suptitle("Majorana bandstructure")
 
     for row = 1:num_rows
         for column = 1:num_columns
@@ -1275,7 +1327,7 @@ function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num
             mean_fields = read_fields[:,:,parameter_id]
 
             bandstructure = get_bilayer_bandstructure(BZ,mean_fields,nn,K,J,G,J_perp)
-            plot_bands_G_to_K(BZ,bandstructure,ax,true)
+            plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,ax)
     
             PyPlot.show()
         end
@@ -1285,5 +1337,5 @@ end
 function uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp, error=10^(-5))
     uncertain_mean_fields = (ones(8,8)+error*randn(8,8)).*mean_fields
     bandstructure = get_bilayer_bandstructure(BZ,uncertain_mean_fields,nn,K,J,G,J_perp)
-    plot_bands_G_to_K(BZ,bandstructure,gca(),true)
+    plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,gca())
 end 
