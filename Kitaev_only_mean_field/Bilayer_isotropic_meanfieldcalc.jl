@@ -403,7 +403,6 @@ function plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,axes)
     kGtoKtoMtoG = collect((1:length(GtoKtoMtoG))*(g1[1]+g2[1])/(2*length(GtoKtoMtoG)))
     kGtoM = collect((1:length(GtoM))*(g1[2]-g2[2])/(2*length(GtoM))) .+ ones(length(GtoM),1)*kGtoKtoMtoG[end]
 
-    display(size(kGtoM))
     M_index = length(GtoKtoMtoG)
 
     append!(kGtoKtoMtoG,kGtoM)
@@ -1142,6 +1141,7 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
 
     fixed_parameters = setdiff(["K","J","G","J_perp"],[scan_type])
 
+    # This section reads the parameters used for the scan from the stored data file. 
     if scan_type == "J"
         J = read_coupling_list[parameter_id]
         K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
@@ -1165,6 +1165,8 @@ function plot_bandstructure_from_stored_data(scan_type,BZ,num_repeats=0,percenta
     PyPlot.figure()
     plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,gca())
 
+
+    # This section repeatedly plots the same set of parameters but adds some random matrix to the mean fields to give an idea of the effect of uncertainty in the mean fields on the bandstructure. 
     if num_repeats > 0 
         for j = 1:num_repeats
             uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp,percentage_error)
@@ -1225,7 +1227,8 @@ end
 function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num_columns)
     """
     Used to plot a parameter scan alongside a num_rows x num_columns grid of plots of Majorana bandstructures for different points in parameter space.
-    Reads stored scan data from shared OneDrive file and plots mean fields vs couplings. Then asks for parameter values and plots bandstructures for those values. 
+    Reads stored scan data from shared OneDrive file and plots mean fields vs couplings. Then asks for parameter values and plots bandstructures for those values.
+    Plots in the order left to right then top to bottom. 
     """
     doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
     display(doc_name)
@@ -1257,7 +1260,7 @@ function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num
     axsLeft = subfigs[1].subplots()
     corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
     plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
-    #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+    plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
 
     PyPlot.show()
 
@@ -1335,7 +1338,174 @@ function plot_multiple_bandstructures_from_stored_data(scan_type,BZ,num_rows,num
 end 
 
 function uncertain_bandstructure_plot(BZ,mean_fields,nn,K,J,G,J_perp, error=10^(-5))
+    """
+    This adds a percentage error to the mean fields by elementwise multiplication of the mean fields with a random matrix with mean 1 and then plotting the resulting bandstructure.
+    The idea is that repeated plots with random error added to the mean fields will give an idea of the uncertainty in the band structure due to effects such as the finite Brillouin zone. 
+    """
     uncertain_mean_fields = (ones(8,8)+error*randn(8,8)).*mean_fields
     bandstructure = get_bilayer_bandstructure(BZ,uncertain_mean_fields,nn,K,J,G,J_perp)
     plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,gca())
+end 
+
+# This section adds new functions to speed up bandstructure calculations 
+
+function get_k_GtoKtoMtoG(Num_points)
+    """
+    Used to create a list of k vectors along the path G to K to M to G in the Brillouin zone. 
+    Takes:
+    - Num_points which is the number of k vectors to sample along the path
+
+    returns:
+    - a 2xNum_points matrix, where each collumn is a k vector
+    """
+    
+    # This section is needed to ensure that k points are sampled evenly along the path 
+    Num_points_GtoKtoM = Int(round(Num_points*3/(3+sqrt(3))))
+    Num_points_MtoG = Int(round(Num_points*sqrt(3)/(3+sqrt(3)))) 
+    Num_points = Num_points_GtoKtoM + Num_points_MtoG
+
+    kGtoKtoMtoG = zeros(2,Num_points)
+    [kGtoKtoMtoG[1,i] = g1[1]*i/Num_points_GtoKtoM for i = 1:Num_points_GtoKtoM]
+    [kGtoKtoMtoG[2,Num_points_GtoKtoM+i] = g1[2]*(1-i/Num_points_MtoG) for i = 1:Num_points_MtoG]
+    return(kGtoKtoMtoG)
+end
+
+function get_bandstructure_GtoKtoMtoG(mean_fields,kGtoKtoMtoG,K,J,G,J_perp)
+    """
+    A faster alternative way to calculate the bandstructure along G to K to M to G than using get_bilayer_bandstructure.
+    Rather than calculating the bandstructure of the entire Brillouin zone then finding k vectors along the path, this only calculates the energies at k vectors which lie on the path you want to plot.
+    This takes:
+    - a set of mean fields as a 8x8 matrix 
+    - a prepared list of k vectors along the path G to K to M to G as a 2xN matrix, N being the number of points sampled along the path 
+    - a set of coupling parameters used to calculate the mean fields 
+    """
+
+    Num_k_points = Int(size(kGtoKtoMtoG)[2])
+
+    bands_GtoKtoMtoG = zeros(16,Num_k_points)
+
+    H_inter = Hamiltonian_interlayer(mean_fields,J_perp)
+    
+    for i = 1:Num_k_points
+        H = Hamiltonian_intralayer(mean_fields,kGtoKtoMtoG[:,i],nn,K,J,G) + H_inter
+        bands_GtoKtoMtoG[:,i] = eigvals(H)
+    end
+
+    return bands_GtoKtoMtoG
+end
+
+function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes)
+    """
+    An alternative way to plot the bandstructure (Faster than plot_bands_G_to_K_to_M_to_G) that takes:
+    - kGtoKtoMtoG a prepared list of k vectors along the path G to K to M to G as a 2xN matrix where N is the number of k vectors sampled along the path
+    - bands_GtoKtoMtoG a list of energies at the corresponding k vectors as a 16xN matrix
+    - an axis object axes used to add features to the plot such as labels. 
+    """
+    Num_k_points = Int(size(kGtoKtoMtoG)[2])
+
+    K_index = round(2*Num_k_points/(3+sqrt(3)))
+    M_index = round(3*Num_k_points/(3+sqrt(3)))
+    
+    E_max = 0 
+    for i = 1:16 
+        if E_max < maximum(bands_GtoKtoMtoG[i,:]) 
+            E_max = maximum(bands_GtoKtoMtoG[i,:])
+        end
+        axes.plot(1:Num_k_points,bands_GtoKtoMtoG[i,:],color="black")
+    end
+
+    axes.set_xticks([0,K_index,M_index,Num_k_points])
+    axes.set_xticklabels(["\$\\Gamma\$","K","M","\$\\Gamma\$"])
+    axes.set_ylabel("Energy")
+    axes.vlines([0,K_index,M_index,Num_k_points],-(1.1*E_max),1.1*E_max,linestyle="dashed")
+end
+
+function plot_all_bandstructures_from_stored_data(scan_type,num_repeats=0,percentage_error=10^-3)
+    """
+    Plots bandstructures using mean field data stored in a file.
+    Takes:
+    - scan_type which can be "J","G" or "J_perp" entered as a string 
+   
+    - After choosing a file this produces a plot of mean fields vs parameter. 
+    - The bandstructure is plotted in a new window and continually updates, increasing the variable parameter so that the changes in bandstructure over the scan can be seen in an animated way. 
+    """
+    doc_name = homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\KJG MF data\\parameter_scan_data\\"*scan_type*"_scans"
+    display(doc_name)
+    
+    fid = h5open(doc_name,"r")
+    show(stdout,"text/plain",keys(fid))
+
+    println("Which file do you want to read? Copy the file name. Type N to quit") 
+    group_name = readline()
+
+    while !(group_name in keys(fid))
+        println("Not found, try again.")
+        group_name = readline()
+    end
+
+    g = fid[group_name]
+
+    read_fields = read(g["output_mean_fields"])
+    read_description = read(g["Description_of_run"])
+    read_coupling_list = read(g[scan_type*"_list"])
+    read_marked_with_x = read(g["marked_with_x_list"])
+
+    title_str = "Varying "*scan_type*" with "*group_name[1:4]*" "*group_name[6:8]*" "*group_name[10:end-5]
+    xlab = scan_type*" /|K|"
+
+    corrected_fields , corrected_coupling_list = remove_marked_fields(read_fields,read_coupling_list,read_marked_with_x)
+    plot_mean_fields_vs_coupling(corrected_fields,corrected_coupling_list,title_str,xlab)
+    #plot_oscillating_fields_vs_coupling(read_fields,read_marked_with_x,read_coupling_list)
+
+    Num_points = length(read_coupling_list)
+    min_parameter = read_coupling_list[1]
+    max_parameter = read_coupling_list[end]
+    parameter_range = max_parameter - min_parameter
+    parameter_resolution = parameter_range/Num_points
+
+    fixed_parameters = setdiff(["K","J","G","J_perp"],[scan_type])
+
+    # This section reads the fixed scan parameters from the description in the stored data file. 
+    if scan_type == "J"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "G"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J_perp = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1]) # The [1:end-1] removes a full stop that occurs in read_description
+    elseif scan_type == "J_perp"
+        K = parse(Float64,match(Regex("(?:"*fixed_parameters[1]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        J = parse(Float64,match(Regex("(?:"*fixed_parameters[2]*"=\\s*(.*?)\\s)"),read_description).captures[1])
+        G = parse(Float64,match(Regex("(?:"*fixed_parameters[3]*"=\\s*(.*?)\\s)"),read_description).captures[1][1:end-1])
+    end 
+
+    kGtoKtoMtoG = get_k_GtoKtoMtoG(5000)
+    PyPlot.figure()
+    ax = gca()
+
+    
+    for parameter_id = 1:Num_points
+        display(parameter_id)
+        cla() # This clears current axes
+        #This section updates the varying parameter 
+        if scan_type == "J"
+            J = read_coupling_list[parameter_id]
+            J_round=round(J,digits=3)
+            ax.set_title("J=$J_round")
+        elseif scan_type == "G"
+            G = read_coupling_list[parameter_id]
+            G_round=round(G,digits=3)
+            ax.set_title("G=$G_round")
+        elseif scan_type == "J_perp"
+            J_perp = read_coupling_list[parameter_id]
+            J_perp_round=round(J_perp,digits=3)
+            ax.set_title("J_perp=$J_perp_round")
+        end
+
+        mean_fields = read_fields[:,:,parameter_id]
+        bands_GtoKtoMtoG = get_bandstructure_GtoKtoMtoG(mean_fields,kGtoKtoMtoG,K,J,G,J_perp)
+        plot_bands_GtoKtoMtoG(kGtoKtoMtoG, bands_GtoKtoMtoG,ax)
+        sleep(0.05)
+    end
 end 
