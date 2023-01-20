@@ -43,7 +43,7 @@ function get_H0(N,K=1)
     return H
 end
 
-function diagonalise(H)
+function diagonalise_sp(H)
     """
     Diagonalises a given Hamiltonian H. H is assumed to be real and symmetric.
     returns:
@@ -51,7 +51,13 @@ function diagonalise(H)
     - A unitary (orthogonal as T is real) matrix T which diagonalises H
     """
     N_sq = Int(size(H)[1]/2)
-    half_spectrum , eigvecs = eigs(H, nev = N_sq, which =:LR)
+    half_spectrum , eigvecs = eigs(H, nev = N_sq, which =:LR, tol = 10^(-7), maxiter = 1000)
+
+    if det(H) <= 10^(-6) 
+        println("Warning: H is singular so there are degenerate eigenvalues")
+        println("This may lead to numerical errors")
+        display(det(H))
+    end 
 
     energies = zeros(2*N_sq,1)
     energies[1:N_sq] = half_spectrum
@@ -61,6 +67,27 @@ function diagonalise(H)
     Y = eigvecs[(N_sq+1):2*N_sq,1:N_sq]'
 
     T = [X Y ; Y X]
+
+    plot(energies)
+
+    return energies , T 
+end 
+
+function diagonalise(H)
+    N_sq = Int(size(H)[1]/2)
+
+    H = Matrix(H)
+
+    energies = eigvals(H)
+    reverse!(energies)
+    eigvec = eigvecs(H)
+
+    X = eigvec[1:N_sq,1:N_sq]'
+    Y = eigvec[(N_sq+1):2*N_sq,1:N_sq]'
+
+    T = [X Y ; Y X]
+
+    plot(energies)
 
     return energies , T 
 end 
@@ -181,9 +208,12 @@ function calculate_z_Heisenberg_hopping_matrix_element(N,K,initial_flux_site=[1,
     a = (X1+Y1)[:,C_A_index]
     b = (Y1-X1)[:,C_B_index]
 
-    display(b'*F*a)
+    println("Hopping due to y spin interaction:")
+    display(a'*b + b'*F*a)
+    println("Normalisation constant C:")
+    display(C)
 
-    hopping_amp = C*( a'*b - b'*F*a + 1)
+    hopping_amp = C*( a'*b + b'*F*a + 1)
 
     return hopping_amp
 end 
