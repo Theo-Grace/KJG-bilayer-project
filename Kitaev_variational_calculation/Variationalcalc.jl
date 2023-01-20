@@ -82,12 +82,13 @@ function diagonalise(H)
     reverse!(energies)
     eigvec = eigvecs(H)
 
+    gamma = [zeros(N_sq,N_sq) Matrix(I,N_sq,N_sq) ; Matrix(I,N_sq,N_sq) zeros(N_sq,N_sq)]
+    eigvec = gamma*eigvec
+
     X = eigvec[1:N_sq,1:N_sq]'
     Y = eigvec[(N_sq+1):2*N_sq,1:N_sq]'
 
     T = [X Y ; Y X]
-
-    plot(energies)
 
     return energies , T 
 end 
@@ -151,7 +152,7 @@ end
 
 function get_X_and_Y(T)
     """
-    Given a unitary matrix T this function extracts the X and Y matrices 
+    Given a unitary matrix T in the form T = [X* Y* ; Y X] this function extracts the X and Y matrices 
     """
     N_sq = Int(size(T)[1]/2)
     X = T[(N_sq+1):2*N_sq,(N_sq+1):2*N_sq]
@@ -209,13 +210,26 @@ function calculate_z_Heisenberg_hopping_matrix_element(N,K,initial_flux_site=[1,
     b = (Y1-X1)[:,C_B_index]
 
     println("Hopping due to y spin interaction:")
-    display(a'*b + b'*F*a)
+    display((a'*b - b'*F*a))
     println("Normalisation constant C:")
     display(C)
 
-    hopping_amp = C*( a'*b + b'*F*a + 1)
+    hopping_amp = (a'*b - b'*F*a + C)
 
     return hopping_amp
 end 
 
-
+function plot_Heisenberg_hopping_vs_system_size(K,N_max)
+    hopping_amp_vec = zeros(1,N_max)
+    for N = 3:N_max
+        hopping_amp_vec[N] = calculate_z_Heisenberg_hopping_matrix_element(N,K)
+        scatter(1/N,hopping_amp_vec[N],color = "blue")
+    end
+    xlabel("Inverse of linear system size 1/N")
+    ylabel("Heisenberg hopping amplitude")
+    if K == 1
+        ylabel("AFM Kitaev term")
+    elseif K == -1
+        ylabel("FM Kitaev term")
+    end 
+end
