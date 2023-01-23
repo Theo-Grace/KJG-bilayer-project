@@ -233,3 +233,39 @@ function plot_Heisenberg_hopping_vs_system_size(K,N_max)
         ylabel("FM Kitaev term")
     end 
 end
+
+function form_A_matrix(N)
+    diag_block = zeros(N,N)
+    for j = 1:(N-1)
+        diag_block[j,j]=1
+        diag_block[j+1,j]=1
+    end
+    diag_block[N,N] = 1
+
+    A = zeros(N^2,N^2)
+    for j = 1:(N-1)
+        A[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = diag_block
+        A[(1+(j-1)*N):(j*N),(1+(j)*N):((j+1)*N)] = Matrix(I,N,N)
+    end 
+    A[(1+N^2-N):N^2,(1+N^2-N):N^2] = diag_block
+
+    return A 
+end 
+
+function form_B_matrix(N)
+    B = zeros(N^2,N^2)
+    for j = 1:N
+        B[N^2-N+j,j*N] = 1
+    end 
+
+    return B 
+end 
+
+function form_C_matrix(N)
+    C = zeros(N^2,N^2)
+    for j=1:N
+        C[(1+(j-1)*N),j] = 1
+    end 
+
+    return C 
+end
