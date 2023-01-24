@@ -100,6 +100,9 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z"
     """
 
+    flux_site = [flux_site[1],flux_site[2]]
+
+    
     A = spzeros(N,N)
     B = spzeros(N,N)
 
@@ -121,10 +124,11 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     M[N*(N-1)+1:N^2,N*(N-1)+1:N^2] = A
     M[N*(N-1)+1:N^2,1:N] = B
 
+    #=
     if flux_flavour == "x"
         B[flux_site[1],flux_site[1]] = -K
         M[(1+(flux_site[2]-1)*N):(flux_site[2]*N),(1+flux_site[2]*N):((flux_site[2]+1)*N)] = B
-        display("BF is")
+        display("B in flux sector is")
         display(B)
     elseif flux_flavour == "y"
         if flux_site[1] == 1
@@ -138,8 +142,29 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     end 
     
     M[(1+(flux_site[2]-1)*N):(flux_site[2]*N),(1+(flux_site[2]-1)*N):(flux_site[2]*N)] = A
-        
-    H = spzeros(2*N^2,2*N^2)
+    =#
+
+    C_A_index = 1 + flux_site[1] + N*flux_site[2]
+
+    if flux_flavour == "z"
+        C_B_index = C_A_index
+    elseif flux_flavour == "x"
+        if flux_site[2] == N - 1
+            C_B_index = 1 + flux_site[1]
+        else
+            C_B_index = C_A_index + N 
+        end 
+    else
+        if flux_site[1] == 0 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    M[C_A_index,C_B_index] = -K 
+
+    H = zeros(2*N^2,2*N^2)
 
     H[1:N^2,1:N^2] = M + transpose(M)
     H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
@@ -234,6 +259,48 @@ function plot_Heisenberg_hopping_vs_system_size(K,N_max)
     end 
 end
 
+function get_M_from_H(H)
+    N = Int(sqrt(size(H)[1]/2))
+    h = H[1:N^2,1:N^2]
+    Delta = H[1:N^2,(1+N^2):2*N^2]
+
+    M = 0.5*(h-Delta)
+
+    return M
+end 
+
+function find_flux_pair_coordinates_from_HF(H)
+
+    N = Int(sqrt(size(H)[1]/2))
+    h = H[1:N^2,1:N^2]
+    Delta = H[1:N^2,(1+N^2):2*N^2]
+
+    M = 0.5*(h-Delta)
+
+    display(M)
+
+    K = sign(sum(M))
+
+    flux_indicies = findall(x->x==-K,M)[1]
+    display(flux_indicies)
+
+    C_A_index = flux_indicies[1]
+    if C_A_index % N == 0 
+        C_A_n1 = N-1
+        C_A_n2 = C_A_index/N -1 
+    else
+        C_A_n2 = floor(C_A_index/N)
+        C_A_n1 = C_A_index - C_A_n2*N -1 
+    end 
+
+
+    display([C_A_n1,C_A_n2])
+end 
+
+
+
+
+#=
 function form_A_matrix(N)
     diag_block = zeros(N,N)
     for j = 1:(N-1)
@@ -269,3 +336,161 @@ function form_C_matrix(N)
 
     return C 
 end
+=#
+
+function form_M_matrix(N)
+    diag_block = zeros(N,N)
+    for j = 1:(N-1)
+        diag_block[j,j]=1
+        diag_block[j+1,j]=1
+    end
+    diag_block[N,N] = 1
+
+    A = zeros(N^2,N^2)
+    for j = 1:(N-1)
+        A[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = diag_block
+        A[(1+(j-1)*N):(j*N),(1+(j)*N):((j+1)*N)] = Matrix(I,N,N)
+    end 
+    A[(1+N^2-N):N^2,(1+N^2-N):N^2] = diag_block
+
+    B = zeros(N^2,N^2)
+    C = zeros(N^2,N^2)
+
+    for j = 1:N
+        B[N^2-N+j,j*N] = 1
+        C[(1+(j-1)*N),j] = 1
+    end
+
+    M = [ A B C ; C A B ; B C A]
+
+    return M 
+end 
+
+function form_R_matrix(N)
+    """
+    R is a 3N^2 x 3N^2 matrix which transforms between the lattice sites basis and eigenstates of the C3 rotation symmetry operator. 
+    """
+    l = exp(2*pi*im/3)
+    R = (1/sqrt(3))* [ I(N^2) l*I(N^2) conj(l)*I(N^2) ; I(N^2) conj(l)*I(N^2) l*I(N^2) ; I(N^2) I(N^2) I(N^2)]
+
+    return R 
+end 
+
+function form_H0_matrix(N)
+    """
+    Calculates a matrix Hamiltonian for the fluxless Kitaev model:
+    H = 1/2 (f' f) H (f f')^T
+    where f are complex matter fermions 
+    """
+    M = form_M_matrix(N)
+    h = M + M'
+    Delta = M'- M 
+    
+    return [h Delta ; Delta' -h]
+end 
+
+function form_H_prime(N)
+    """
+    Calculates a matrix Hamiltonian for the fluxless Kitaev model in the rotated basis of symmetry eigenstates:
+    H = 1/2 (F' F) H' (F F')^T
+    where F are complex matter fermions in the C3 symmetry eigenbasis 
+    """
+    R = form_R_matrix(N)
+    M = form_M_matrix(N)
+
+    curly_M = R*M*R'
+
+    h = curly_M + curly_M'
+    Delta = curly_M' - curly_M
+
+    return [ h Delta ; Delta' -h ]
+end 
+
+function form_gamma_matrix(N)
+    gamma = zeros(6*N^2,6*N^2)
+    gamma[1:N^2,1:N^2] = I(N^2)
+    gamma[(N^2+1):2*N^2,(1+3*N^2):4*N^2] = I(N^2)
+    gamma[(2*N^2+1):3*N^2,(1+N^2):2*N^2] = I(N^2)
+    gamma[(3*N^2+1):4*N^2,(4*N^2+1):5*N^2] = I(N^2)
+    gamma[(4*N^2+1):5*N^2,(2*N^2+1):3*N^2] = I(N^2)
+    gamma[(5*N^2+1):6*N^2,(5*N^2+1):6*N^2] = I(N^2) 
+
+    return gamma
+end 
+
+function form_gamma_2_matrix(N)
+    gamma = zeros(6*N^2,6*N^2)
+    reverse_order = zeros(N^2,N^2)
+    for j = 1:N^2
+        reverse_order[N^2+1-j,j] = 1
+    end 
+    
+    gamma[1:N^2,(N^2+1):2*N^2] = I(N^2)
+    gamma[(N^2+1):2*N^2,(3*N^2+1):4*N^2] = I(N^2)
+    gamma[(2*N^2+1):3*N^2,(5*N^2+1):6*N^2] = I(N^2)
+    gamma[(3*N^2+1):4*N^2,1:N^2] = reverse_order
+    gamma[(4*N^2+1):5*N^2,(2*N^2+1):3*N^2] = reverse_order
+    gamma[(5*N^2+1):6*N^2,(4*N^2+1):5*N^2] = reverse_order
+
+    return gamma
+end
+
+
+function block_diagonalise(H_prime)
+    N = Int(sqrt(size(H_prime)[1]/6))
+    g = form_gamma_matrix(N)
+    
+    return g*H_prime*g'
+end 
+
+function diagonalise_blocks(H_prime)
+    """
+    This diagonalises the matrix H_prime in a single function. It works by: 
+    - transforming H_prime into block diagonal form with 3 2N^2 x 2N^2 blocks 
+    - Diagonalising each block seperately and forming a block diagonal unitary matrix U 
+    - Transforming U back into the original basis, with reordered eigenvalues 
+    returns 
+    - T_prime, a unitary matrix such that T_prime*H_prime*T_prime' = [E 0 ; -E 0]
+
+    NOTE the eigenvalue in E are NOT in increasing size order. 
+    """
+    N = Int(sqrt(size(H_prime)[1]/6))
+    g = form_gamma_matrix(N)
+    g2 = form_gamma_2_matrix(N)
+
+    block_diagonal_H = g*H_prime*g'
+
+    U = zeros(Complex{Float64},6*N^2,6*N^2)
+
+    for j = 1:3
+        U[(1+2*(j-1)*N^2):j*2*N^2,(1+2*(j-1)*N^2):j*2*N^2] = eigvecs(block_diagonal_H[(1+2*(j-1)*N^2):j*2*N^2,(1+2*(j-1)*N^2):j*2*N^2])
+    end 
+
+    T_prime = g2*U'*g
+
+    return T_prime
+end
+
+function diagonalise_H0(H_prime)
+    N = Int(sqrt(size(H_prime)[1]/6))
+    g = form_gamma_matrix(N)
+    g2 = form_gamma_2_matrix(N)
+    R = form_R_matrix(N)
+
+    block_diagonal_H = g*H_prime*g'
+
+    U = zeros(Complex{Float64},6*N^2,6*N^2)
+
+    for j = 1:3
+        U[(1+2*(j-1)*N^2):j*2*N^2,(1+2*(j-1)*N^2):j*2*N^2] = eigvecs(block_diagonal_H[(1+2*(j-1)*N^2):j*2*N^2,(1+2*(j-1)*N^2):j*2*N^2])
+    end 
+
+    T_prime = g2*U'*g
+
+    T = T_prime*[ R zeros(3*N^2,3*N^2) ; zeros(3*N^2,3*N^2) R]
+
+    Y = T[(3N^2+1):end,1:3*N^2]
+    X = T[(3N^2+1):end,(3N^2+1):end]
+
+    return [conj(X) conj(Y) ; Y X]
+end 
