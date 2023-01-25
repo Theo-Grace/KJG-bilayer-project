@@ -45,7 +45,7 @@ end
 
 function diagonalise_sp(H)
     """
-    Diagonalises a given Hamiltonian H. H is assumed to be real and symmetric.
+    Diagonalises a given Hamiltonian H. H is assumed to be real, symmetric and in sparse matrix format. 
     returns:
     - a full spectrum of eigenvalues. It is assumed that for each energy E, -E is also an eigenvalue.
     - A unitary (orthogonal as T is real) matrix T which diagonalises H
@@ -95,9 +95,28 @@ end
 
 function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
     """
-    Creates a 2N^2 x 2N^2 Hamiltonian matrix for a flux sector with a single flux pair 
-    The flux pair is located at the lattice site flux_site which is given as a coordinate [n1,n2] = n1*a1 + n2*a2 where a1,a2 are plvs.
-    flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z"
+    Creates a 2N^2 x 2N^2 Hamiltonian matrix for a flux sector with a single flux pair. 
+    The flux pair is located at the lattice site flux_site which is given as a coordinate [n1,n2] = n1*a1 + n2*a2 where a1,a2 are plvs. 
+    The lattice sites are numbered such that an A site at [n1,n2] is given the index 1 + n1 + N*n2 
+    The B lattice sites are numbered such that the B site connected to A via a z bond is given the same number. 
+    flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z".
+
+    The matrix H is calculated using the following steps:
+    - Calculate the matrix M which descibes H in terms of Majorana fermions:
+        0.5[C_A C_B][ 0 M ; -M 0][C_A C_B]^T
+        
+        - M is initially calculated in the same way as for H0 
+        - A flipped bond variable (equivalent to adding flux pair) is added
+        - flux_site specifies the A sublattice site, which specifies the row of M on which the variable is flipped, via C_A_index = 1 + n1 + n2*N
+        - flux_flavour specifies the neighbouring B sublattice site, which specifies the column of M on which the variable is flipped 
+    
+    - Use M to calculate H in the basis of complex matter fermions:
+        C_A = f + f'
+        C_B = i(f'-f)
+
+    returns:
+    - A 2N^2 x 2N^2 sparse matrix Hamiltonian in the complex matter fermion basis 
+
     """
 
     flux_site = [flux_site[1],flux_site[2]]
@@ -148,7 +167,7 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
 
     if flux_flavour == "z"
         C_B_index = C_A_index
-    elseif flux_flavour == "x"
+    elseif flux_flavour == "y"
         if flux_site[2] == N - 1
             C_B_index = 1 + flux_site[1]
         else
@@ -218,6 +237,7 @@ function get_normalisation_constant(TF1,TF2)
 end 
 
 function calculate_z_Heisenberg_hopping_matrix_element(N,K,initial_flux_site=[1,1])
+    #=
     HF1 = get_HF(N,K,initial_flux_site)
     EF1, TF1 = diagonalise(HF1)
     HF2 = get_HF(N,K,initial_flux_site+[1,0])
@@ -240,15 +260,58 @@ function calculate_z_Heisenberg_hopping_matrix_element(N,K,initial_flux_site=[1,
     display(C)
 
     hopping_amp = (a'*b - b'*F*a + C)
+    =#
+
+    mark_with_x = false
+    initial_flux_site = [Int(round(N/2)),Int(round(N/2))]
+    final_flux_site = initial_flux_site + [1,0]
+    
+    initial_HF = get_HF(N,K,initial_flux_site,"z")
+    final_HF = get_HF(N,K,final_flux_site,"z")
+
+    _ , initial_TF = diagonalise(initial_HF)
+    _ , final_TF = diagonalise(final_HF)
+
+    C = get_normalisation_constant(initial_TF,final_TF)
+
+    initial_X , initial_Y = get_X_and_Y(initial_TF)
+
+    a_init = transpose(initial_X + initial_Y)
+    b_init = transpose(initial_X - initial_Y)
+
+
+    # T is a matrix which transforms the creation and annihilation operators for the initial flux sector into those of the final flux sector [f_final f_final']^T = T[f_initial f_initial']^T
+    T = final_TF*initial_TF'
+
+    if abs(sum(T*T')-2*N^2) > 0.2
+        println("Warning: T is not unitary")
+        mark_with_x = true 
+    end
+
+    X , Y = get_X_and_Y(T)
+    M = inv(X)*Y 
+
+    i1 = convert_lattice_vector_to_index(final_flux_site,N)
+    j0 = convert_lattice_vector_to_index(initial_flux_site,N)
+
+    hopping_amp = C*(-a_init[i1,:]'*M*b_init[j0,:] + a_init[i1,:]'*b_init[j0,:] + 1) 
+
+    return hopping_amp , mark_with_x
+
 
     return hopping_amp
 end 
 
 function plot_Heisenberg_hopping_vs_system_size(K,N_max)
     hopping_amp_vec = zeros(1,N_max)
-    for N = 3:N_max
-        hopping_amp_vec[N] = calculate_z_Heisenberg_hopping_matrix_element(N,K)
-        scatter(1/N,hopping_amp_vec[N],color = "blue")
+    for N = 4:N_max
+        hopping_amp_vec[N] , mark_with_x = calculate_z_Heisenberg_hopping_matrix_element(N,K)
+        if mark_with_x == false
+            scatter(1/N,hopping_amp_vec[N],color = "blue")
+        else
+            scatter(1/N,hopping_amp_vec[N],color = "blue",marker = "x")
+        end
+        display(N)
     end
     xlabel("Inverse of linear system size 1/N")
     ylabel("Heisenberg hopping amplitude")
@@ -277,27 +340,113 @@ function find_flux_pair_coordinates_from_HF(H)
 
     M = 0.5*(h-Delta)
 
-    display(M)
-
     K = sign(sum(M))
 
     flux_indicies = findall(x->x==-K,M)[1]
-    display(flux_indicies)
 
     C_A_index = flux_indicies[1]
     if C_A_index % N == 0 
-        C_A_n1 = N-1
-        C_A_n2 = C_A_index/N -1 
+        C_A_n1 = Int(N-1)
+        C_A_n2 = Int(C_A_index/N -1)
     else
-        C_A_n2 = floor(C_A_index/N)
-        C_A_n1 = C_A_index - C_A_n2*N -1 
+        C_A_n2 = Int(floor(C_A_index/N))
+        C_A_n1 = Int(C_A_index - C_A_n2*N -1)
     end 
 
+    C_B_index = flux_indicies[2]
+    if C_B_index % N == 0 
+        C_B_n1 = Int(N-1)
+        C_B_n2 = Int(C_B_index/N -1) 
+    else
+        C_B_n2 = Int(floor(C_B_index/N))
+        C_B_n1 = Int(C_B_index - C_B_n2*N -1) 
+    end 
 
-    display([C_A_n1,C_A_n2])
+    if C_A_index == C_B_index
+        flux_flavour = "z"
+    elseif C_B_n1 == C_A_n1 
+        flux_flavour = "y"
+    elseif C_B_n2 == C_A_n2
+        flux_flavour = "x"
+    end 
+
+    println("flux pair at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $flux_flavour")
 end 
 
+function calculate_yz_Gamma_hopping_amplitude(N,K)
 
+    mark_with_x = false
+    initial_flux_site = [Int(round(N/2)),Int(round(N/2))]
+    final_flux_site = initial_flux_site + [1,0]
+    
+    initial_HF = get_HF(N,K,initial_flux_site,"z")
+    final_HF = get_HF(N,K,final_flux_site,"y")
+
+    #=
+    if det(initial_HF) < 10^(-12)
+        println("Warning: det initial_HF is small indicating possible degenerate zero modes")
+        mark_with_x = true 
+    end
+    if det(final_HF) < 10^(-12)
+        println("Warning: det final_HF is small indicating degenerate zero modes")
+        mark_with_x = true 
+    end 
+    =#
+
+    _ , initial_TF = diagonalise(initial_HF)
+    _ , final_TF = diagonalise(final_HF)
+
+    C = get_normalisation_constant(initial_TF,final_TF)
+
+    initial_X , initial_Y = get_X_and_Y(initial_TF)
+
+    a_init = transpose(initial_X + initial_Y)
+    b_init = transpose(initial_X - initial_Y)
+
+
+    # T is a matrix which transforms the creation and annihilation operators for the initial flux sector into those of the final flux sector [f_final f_final']^T = T[f_initial f_initial']^T
+    T = final_TF*initial_TF'
+
+    if abs(sum(T*T')-2*N^2) > 0.3
+        println("Warning: T is not unitary")
+        mark_with_x = true 
+    end
+
+    X , Y = get_X_and_Y(T)
+    M = inv(X)*Y 
+
+    i1 = convert_lattice_vector_to_index(final_flux_site,N)
+    j0 = convert_lattice_vector_to_index(initial_flux_site,N)
+
+    hopping_amp = C*(-a_init[i1,:]'*M*b_init[j0,:] + a_init[i1,:]'*b_init[j0,:] - 1) 
+
+    return hopping_amp , mark_with_x
+end 
+
+function convert_lattice_vector_to_index(lattice_vector,N)
+    index = 1 + lattice_vector[1] + N*lattice_vector[2]
+    return index
+end 
+
+function plot_Gamma_hopping_vs_system_size(K,N_max)
+    hopping_amp_vec = zeros(1,N_max)
+    for N = 4:N_max
+        hopping_amp_vec[N] , mark_with_x = calculate_yz_Gamma_hopping_amplitude(N,K)
+        if mark_with_x == false
+            scatter(1/N,hopping_amp_vec[N],color = "blue")
+        else
+            scatter(1/N,hopping_amp_vec[N],color = "blue",marker = "x")
+        end
+        display(N)
+    end
+    xlabel("Inverse of linear system size 1/N")
+    ylabel("Gamma hopping amplitude")
+    if K == 1
+        ylabel("AFM Kitaev term")
+    elseif K == -1
+        ylabel("FM Kitaev term")
+    end 
+end
 
 
 #=
