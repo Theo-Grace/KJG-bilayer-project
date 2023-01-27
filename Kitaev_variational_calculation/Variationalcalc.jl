@@ -143,26 +143,6 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     M[N*(N-1)+1:N^2,N*(N-1)+1:N^2] = A
     M[N*(N-1)+1:N^2,1:N] = B
 
-    #=
-    if flux_flavour == "x"
-        B[flux_site[1],flux_site[1]] = -K
-        M[(1+(flux_site[2]-1)*N):(flux_site[2]*N),(1+flux_site[2]*N):((flux_site[2]+1)*N)] = B
-        display("B in flux sector is")
-        display(B)
-    elseif flux_flavour == "y"
-        if flux_site[1] == 1
-            A[1,N] = -K
-        else
-            A[flux_site[2],flux_site[2]-1] = -K
-        end 
-    else
-        A[flux_site[1],flux_site[1]] = -K
-
-    end 
-    
-    M[(1+(flux_site[2]-1)*N):(flux_site[2]*N),(1+(flux_site[2]-1)*N):(flux_site[2]*N)] = A
-    =#
-
     C_A_index = 1 + flux_site[1] + N*flux_site[2]
 
     if flux_flavour == "z"
@@ -205,16 +185,6 @@ function get_X_and_Y(T)
     return X , Y 
 end 
 
-function transform_between_flux_sectors(TF1,TF2)
-    """
-    Given the Hamiltonian for two flux sectors F1 and F2, this calculates unitary transformation T. 
-    Applying T to the creation and annihilation operators of F1 gives the corresponding operators for F2
-    """
-    T = TF2*TF1'
-
-    return T 
-end
-
 function get_F_matrix(TF1,TF2)
     """
     calculates the matrix F (see Knolle's thesis) used to relate quasi-particle vacua in two different flux sectors 
@@ -236,7 +206,7 @@ function get_normalisation_constant(TF1,TF2)
     return c
 end 
 
-function calculate_z_Heisenberg_hopping_matrix_element(N,K,initial_flux_site=[1,1])
+function calculate_z_Heisenberg_hopping_matrix_element(N,K)
     #=
     HF1 = get_HF(N,K,initial_flux_site)
     EF1, TF1 = diagonalise(HF1)
@@ -332,7 +302,11 @@ function get_M_from_H(H)
     return M
 end 
 
-function find_flux_pair_coordinates_from_HF(H)
+function find_flipped_bond_coordinates(H)
+    """
+    Assumes the Hamiltonian contains only a single flipped bond. 
+    Finds the coordinate of the flipped bond site in the form [n1,n2] = n1*a1 + n2*a2
+    """
 
     N = Int(sqrt(size(H)[1]/2))
     h = H[1:N^2,1:N^2]
@@ -342,35 +316,37 @@ function find_flux_pair_coordinates_from_HF(H)
 
     K = sign(sum(M))
 
-    flux_indicies = findall(x->x==-K,M)[1]
+    bond_indicies_set = findall(x->x==-K,M)
+    
+    for bond_indicies in bond_indicies_set
+        C_A_index = bond_indicies[1]
+        if C_A_index % N == 0 
+            C_A_n1 = Int(N-1)
+            C_A_n2 = Int(C_A_index/N -1)
+        else
+            C_A_n2 = Int(floor(C_A_index/N))
+            C_A_n1 = Int(C_A_index - C_A_n2*N -1)
+        end 
 
-    C_A_index = flux_indicies[1]
-    if C_A_index % N == 0 
-        C_A_n1 = Int(N-1)
-        C_A_n2 = Int(C_A_index/N -1)
-    else
-        C_A_n2 = Int(floor(C_A_index/N))
-        C_A_n1 = Int(C_A_index - C_A_n2*N -1)
+        C_B_index = bond_indicies[2]
+        if C_B_index % N == 0 
+            C_B_n1 = Int(N-1)
+            C_B_n2 = Int(C_B_index/N -1) 
+        else
+            C_B_n2 = Int(floor(C_B_index/N))
+            C_B_n1 = Int(C_B_index - C_B_n2*N -1) 
+        end 
+
+        if C_A_index == C_B_index
+            bond_flavour = "z"
+        elseif C_B_n1 == C_A_n1 
+            bond_flavour = "y"
+        elseif C_B_n2 == C_A_n2
+            bond_flavour = "x"
+        end
+        
+        println("flipped bond at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $bond_flavour")
     end 
-
-    C_B_index = flux_indicies[2]
-    if C_B_index % N == 0 
-        C_B_n1 = Int(N-1)
-        C_B_n2 = Int(C_B_index/N -1) 
-    else
-        C_B_n2 = Int(floor(C_B_index/N))
-        C_B_n1 = Int(C_B_index - C_B_n2*N -1) 
-    end 
-
-    if C_A_index == C_B_index
-        flux_flavour = "z"
-    elseif C_B_n1 == C_A_n1 
-        flux_flavour = "y"
-    elseif C_B_n2 == C_A_n2
-        flux_flavour = "x"
-    end 
-
-    println("flux pair at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $flux_flavour")
 end 
 
 function calculate_yz_Gamma_hopping_amplitude(N,K)
@@ -407,7 +383,7 @@ function calculate_yz_Gamma_hopping_amplitude(N,K)
     # T is a matrix which transforms the creation and annihilation operators for the initial flux sector into those of the final flux sector [f_final f_final']^T = T[f_initial f_initial']^T
     T = final_TF*initial_TF'
 
-    if abs(sum(T*T')-2*N^2) > 0.3
+    if abs(sum(T*T')-2*N^2) > 0.2
         println("Warning: T is not unitary")
         mark_with_x = true 
     end
@@ -448,6 +424,131 @@ function plot_Gamma_hopping_vs_system_size(K,N_max)
     end 
 end
 
+function flip_bond_variable(H,bond_site,bond_flavour)
+    N = Int(sqrt(size(H)[1]/2))
+
+    M = get_M_from_H(H)
+
+    C_A_index = 1 + bond_site[1] + N*bond_site[2]
+
+    if bond_flavour == "z"
+        C_B_index = C_A_index
+    elseif bond_flavour == "y"
+        if bond_site[2] == N - 1
+            C_B_index = 1 + bond_site[1]
+        else
+            C_B_index = C_A_index + N 
+        end 
+    else
+        if bond_site[1] == 0 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    M[C_A_index,C_B_index] = - M[C_A_index,C_B_index]
+
+    H = zeros(2*N^2,2*N^2)
+
+    H[1:N^2,1:N^2] = M + transpose(M)
+    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
+    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
+    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
+
+    return H 
+end 
+
+function calculate_interlayer_hopping_amplitude(N,K,flux_site)
+
+    mark_with_x = false
+    H0 = get_H0(N,K)
+
+    
+    H_xy = flip_bond_variable(H0,flux_site,"x")
+    H_xy = flip_bond_variable(H_xy,flux_site,"y")
+
+    find_flipped_bond_coordinates(H_xy)
+
+    _ , T0 = diagonalise(H0)
+    _ , T_xy = diagonalise(H_xy)
+    T = T_xy*T0'
+
+    return H_xy 
+    #=
+    if abs(sum(T*T')-2*N^2) > 0.2
+        println("Warning: T is not unitary")
+        mark_with_x = true 
+    end
+
+    if abs(sum(T0*T0')-2*N^2) > 0.2
+        println("Warning: T is not unitary")
+        mark_with_x = true 
+    end
+
+    if abs(sum(T_xy*T_xy')-2*N^2) > 0.2
+        println("Warning: T is not unitary")
+        mark_with_x = true 
+    end
+
+    X_xy , Y_xy = get_X_and_Y(T_xy)
+    X , Y = get_X_and_Y(T)
+
+    scaling = 1
+
+    X = scaling*X
+
+    M = scaling*inv(X)*Y
+
+    if det(X) < 10^(-10)
+        println("Warning: det(X) is very small, inv(X) is likely to be very large")
+        mark_with_x = true 
+    end 
+
+    
+    a_init = transpose(X_xy + Y_xy)
+    b_init = transpose(X_xy - Y_xy)
+
+    #display(X)
+    #display(det(X))
+    #display(det(X'))
+    #display(det(X)*det(X'))
+    C = (det(X)*det(X'))^(1/4)*(scaling)^(-N^2/2)
+
+
+    i = convert_lattice_vector_to_index(flux_site,N)
+    j = i 
+
+    display(C)
+    display(-a_init[i,:]'*M*b_init[j,:])
+
+    hopping_amp = (C^2)*(1+(-a_init[i,:]'*M*b_init[j,:] + a_init[i,:]'*b_init[j,:])^2)
+
+    return hopping_amp , mark_with_x
+    =#
+end 
+
+function plot_interlayer_hopping_vs_system_size(K,N_max)
+    hopping_amp_vec = zeros(1,N_max)
+    for N = 4:N_max
+        hopping_amp_vec[N] , mark_with_x = calculate_interlayer_hopping_amplitude(N,K)
+        if mark_with_x == false
+            scatter(1/N,hopping_amp_vec[N],color = "blue")
+        else
+            scatter(1/N,hopping_amp_vec[N],color = "blue",marker = "x")
+        end
+        display(N)
+    end
+    xlabel("Inverse of linear system size 1/N")
+    ylabel("Gamma hopping amplitude")
+    if K == 1
+        ylabel("AFM Kitaev term")
+    elseif K == -1
+        ylabel("FM Kitaev term")
+    end 
+end
+
+
 
 #=
 function form_A_matrix(N)
@@ -485,6 +586,11 @@ function form_C_matrix(N)
 
     return C 
 end
+=#
+
+#=
+This final section of code is an attempt to use the  3 fold rotation symmetry of the ground state to reduce the Hamiltonian to block diagonal form before diagonalising. 
+The code is successful at block diagonalising and finding the diagonalising transformation but the transformation is not unitary and is only applicable to the ground state so for now it is left incomplete. 
 =#
 
 function form_M_matrix(N)
