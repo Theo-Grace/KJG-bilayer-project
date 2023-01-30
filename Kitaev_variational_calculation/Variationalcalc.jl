@@ -4,6 +4,8 @@ using Arpack
 using PyPlot
 pygui(true) 
 
+#=
+This section uses the old ordering of the sites, where the periodic boundary conditions are implemented using the basis (n1,n2)
 function get_H0(N,K=1)
     """
     Calculates a 2N^2 x 2N^2 matrix H0 which is the Hamiltonian for a flux free Kitaev model in terms of complex matter fermions. 
@@ -23,6 +25,213 @@ function get_H0(N,K=1)
     A[1,N] = K
 
     
+
+    M = spzeros(N^2,N^2)
+    for j = 1:(N-1)
+        M[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = A
+        M[(1+(j-1)*N):(j*N),(1+j*N):((j+1)*N)] = B
+    end
+
+    M[N*(N-1)+1:N^2,N*(N-1)+1:N^2] = A
+    M[N*(N-1)+1:N^2,1:N] = B
+
+    H = spzeros(2*N^2,2*N^2)
+
+    H[1:N^2,1:N^2] = M + transpose(M)
+    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
+    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
+    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
+
+    return H
+end
+
+function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
+    """
+    Creates a 2N^2 x 2N^2 Hamiltonian matrix for a flux sector with a single flux pair. 
+    The flux pair is located at the lattice site flux_site which is given as a coordinate [n1,n2] = n1*a1 + n2*a2 where a1,a2 are plvs. 
+    The lattice sites are numbered such that an A site at [n1,n2] is given the index 1 + n1 + N*n2 
+    The B lattice sites are numbered such that the B site connected to A via a z bond is given the same number. 
+    flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z".
+
+    The matrix H is calculated using the following steps:
+    - Calculate the matrix M which descibes H in terms of Majorana fermions:
+        0.5[C_A C_B][ 0 M ; -M 0][C_A C_B]^T
+        
+        - M is initially calculated in the same way as for H0 
+        - A flipped bond variable (equivalent to adding flux pair) is added
+        - flux_site specifies the A sublattice site, which specifies the row of M on which the variable is flipped, via C_A_index = 1 + n1 + n2*N
+        - flux_flavour specifies the neighbouring B sublattice site, which specifies the column of M on which the variable is flipped 
+    
+    - Use M to calculate H in the basis of complex matter fermions:
+        C_A = f + f'
+        C_B = i(f'-f)
+
+    returns:
+    - A 2N^2 x 2N^2 sparse matrix Hamiltonian in the complex matter fermion basis 
+
+    """
+
+    flux_site = [flux_site[1],flux_site[2]]
+
+    
+    A = spzeros(N,N)
+    B = spzeros(N,N)
+
+    for j = 1:N-1
+        A[j,j] = K
+        A[j+1,j] = K
+        B[j,j] = K
+    end 
+    A[N,N] = K
+    A[1,N] = K
+    B[N,N] = K
+
+    M = spzeros(N^2,N^2)
+    for j = 1:(N-1)
+        M[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = A
+        M[(1+(j-1)*N):(j*N),(1+j*N):((j+1)*N)] = B
+    end
+
+    M[N*(N-1)+1:N^2,N*(N-1)+1:N^2] = A
+    M[N*(N-1)+1:N^2,1:N] = B
+
+    C_A_index = 1 + flux_site[1] + N*flux_site[2]
+
+    if flux_flavour == "z"
+        C_B_index = C_A_index
+    elseif flux_flavour == "y"
+        if flux_site[2] == N - 1
+            C_B_index = 1 + flux_site[1]
+        else
+            C_B_index = C_A_index + N 
+        end 
+    else
+        if flux_site[1] == 0 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    M[C_A_index,C_B_index] = -K 
+
+    H = zeros(2*N^2,2*N^2)
+
+    H[1:N^2,1:N^2] = M + transpose(M)
+    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
+    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
+    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
+
+    return H 
+
+end 
+
+function flip_bond_variable(H,bond_site,bond_flavour)
+    N = Int(sqrt(size(H)[1]/2))
+
+    M = get_M_from_H(H)
+
+    C_A_index = 1 + bond_site[1] + N*bond_site[2]
+
+    if bond_flavour == "z"
+        C_B_index = C_A_index
+    elseif bond_flavour == "y"
+        if bond_site[2] == N - 1
+            C_B_index = 1 + bond_site[1]
+        else
+            C_B_index = C_A_index + N 
+        end 
+    else
+        if bond_site[1] == 0 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    M[C_A_index,C_B_index] = - M[C_A_index,C_B_index]
+
+    H = zeros(2*N^2,2*N^2)
+
+    H[1:N^2,1:N^2] = M + transpose(M)
+    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
+    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
+    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
+
+    return H 
+end 
+
+function convert_lattice_vector_to_index(lattice_vector,N)
+    index = 1 + lattice_vector[1] + N*lattice_vector[2]
+    return index
+end 
+
+function find_flipped_bond_coordinates(H)
+    """
+    Assumes the Hamiltonian contains only a single flipped bond. 
+    Finds the coordinate of the flipped bond site in the form [n1,n2] = n1*a1 + n2*a2
+    """
+
+    N = Int(sqrt(size(H)[1]/2))
+    h = H[1:N^2,1:N^2]
+    Delta = H[1:N^2,(1+N^2):2*N^2]
+
+    M = 0.5*(h-Delta)
+
+    K = sign(sum(M))
+
+    bond_indicies_set = findall(x->x==-K,M)
+    
+    for bond_indicies in bond_indicies_set
+        C_A_index = bond_indicies[1]
+        if C_A_index % N == 0 
+            C_A_n1 = Int(N-1)
+            C_A_n2 = Int(C_A_index/N -1)
+        else
+            C_A_n2 = Int(floor(C_A_index/N))
+            C_A_n1 = Int(C_A_index - C_A_n2*N -1)
+        end 
+
+        C_B_index = bond_indicies[2]
+        if C_B_index % N == 0 
+            C_B_n1 = Int(N-1)
+            C_B_n2 = Int(C_B_index/N -1) 
+        else
+            C_B_n2 = Int(floor(C_B_index/N))
+            C_B_n1 = Int(C_B_index - C_B_n2*N -1) 
+        end 
+
+        if C_A_index == C_B_index
+            bond_flavour = "z"
+        elseif C_B_n1 == C_A_n1 
+            bond_flavour = "y"
+        elseif C_B_n2 == C_A_n2
+            bond_flavour = "x"
+        end
+        
+        println("flipped bond at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $bond_flavour")
+    end 
+end 
+=#
+
+function get_H0(N,K=1)
+    """
+    Calculates a 2N^2 x 2N^2 matrix H0 which is the Hamiltonian for a flux free Kitaev model in terms of complex matter fermions. 
+    - K is the Kitaev parameter (take to be +1 or -1)
+    returns:
+    - a 2N^2 x 2N^2 Hamiltonian matrix which is real and symmetric 
+    """
+    A = spzeros(N,N)
+    B = spzeros(N,N)
+
+    for j = 1:N-1
+        A[j,j] = K
+        A[j+1,j] = K
+        B[j+1,j] = K
+    end 
+    A[N,N] = K
+    A[1,N] = K
+    B[1,N] = K
 
     M = spzeros(N^2,N^2)
     for j = 1:(N-1)
@@ -119,58 +328,11 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
 
     """
 
-    flux_site = [flux_site[1],flux_site[2]]
+    H0 = get_H0(N,K)
 
-    
-    A = spzeros(N,N)
-    B = spzeros(N,N)
+    HF = flip_bond_variable(H0,flux_site,flux_flavour)
 
-    for j = 1:N-1
-        A[j,j] = K
-        A[j+1,j] = K
-        B[j,j] = K
-    end 
-    A[N,N] = K
-    A[1,N] = K
-    B[N,N] = K
-
-    M = spzeros(N^2,N^2)
-    for j = 1:(N-1)
-        M[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = A
-        M[(1+(j-1)*N):(j*N),(1+j*N):((j+1)*N)] = B
-    end
-
-    M[N*(N-1)+1:N^2,N*(N-1)+1:N^2] = A
-    M[N*(N-1)+1:N^2,1:N] = B
-
-    C_A_index = 1 + flux_site[1] + N*flux_site[2]
-
-    if flux_flavour == "z"
-        C_B_index = C_A_index
-    elseif flux_flavour == "y"
-        if flux_site[2] == N - 1
-            C_B_index = 1 + flux_site[1]
-        else
-            C_B_index = C_A_index + N 
-        end 
-    else
-        if flux_site[1] == 0 
-            C_B_index = C_A_index + N -1
-        else 
-            C_B_index = C_A_index -1 
-        end 
-    end 
-
-    M[C_A_index,C_B_index] = -K 
-
-    H = zeros(2*N^2,2*N^2)
-
-    H[1:N^2,1:N^2] = M + transpose(M)
-    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
-    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
-    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
-
-    return H 
+    return HF
 
 end 
 
@@ -321,20 +483,20 @@ function find_flipped_bond_coordinates(H)
     for bond_indicies in bond_indicies_set
         C_A_index = bond_indicies[1]
         if C_A_index % N == 0 
-            C_A_n1 = Int(N-1)
             C_A_n2 = Int(C_A_index/N -1)
+            C_A_n1 = Int(N-1) + C_A_n2
         else
             C_A_n2 = Int(floor(C_A_index/N))
-            C_A_n1 = Int(C_A_index - C_A_n2*N -1)
+            C_A_n1 = Int(C_A_index - C_A_n2*N -1 + C_A_n2)
         end 
 
         C_B_index = bond_indicies[2]
         if C_B_index % N == 0 
-            C_B_n1 = Int(N-1)
             C_B_n2 = Int(C_B_index/N -1) 
+            C_B_n1 = Int(N-1) + C_B_n2
         else
             C_B_n2 = Int(floor(C_B_index/N))
-            C_B_n1 = Int(C_B_index - C_B_n2*N -1) 
+            C_B_n1 = Int(C_B_index - C_B_n2*N -1 + C_B_n2) 
         end 
 
         if C_A_index == C_B_index
@@ -400,7 +562,7 @@ function calculate_yz_Gamma_hopping_amplitude(N,K)
 end 
 
 function convert_lattice_vector_to_index(lattice_vector,N)
-    index = 1 + lattice_vector[1] + N*lattice_vector[2]
+    index = 1 + lattice_vector[1] - lattice_vector[2] + N*lattice_vector[2]
     return index
 end 
 
@@ -429,18 +591,24 @@ function flip_bond_variable(H,bond_site,bond_flavour)
 
     M = get_M_from_H(H)
 
-    C_A_index = 1 + bond_site[1] + N*bond_site[2]
+    C_A_index = 1 + bond_site[1] - bond_site[2] + N*bond_site[2]
 
     if bond_flavour == "z"
         C_B_index = C_A_index
     elseif bond_flavour == "y"
         if bond_site[2] == N - 1
-            C_B_index = 1 + bond_site[1]
+            if bond_site[1] == bond_site[2]
+                C_B_index = N
+            else
+                C_B_index = bond_site[1]-bond_site[2]
+            end 
+        elseif bond_site[1] == bond_site[2]
+            C_B_index = C_A_index + 2*N - 1
         else
-            C_B_index = C_A_index + N 
+            C_B_index = C_A_index + N - 1 
         end 
     else
-        if bond_site[1] == 0 
+        if bond_site[1] == bond_site[2] 
             C_B_index = C_A_index + N -1
         else 
             C_B_index = C_A_index -1 
@@ -470,12 +638,10 @@ function calculate_interlayer_hopping_amplitude(N,K,flux_site)
 
     find_flipped_bond_coordinates(H_xy)
 
-    _ , T0 = diagonalise(H0)
-    _ , T_xy = diagonalise(H_xy)
-    T = T_xy*T0'
+    E0 , T0 = diagonalise(H0)
+    E_xy , T_xy = diagonalise(H_xy)
+    T = T0*T_xy'
 
-    return H_xy 
-    #=
     if abs(sum(T*T')-2*N^2) > 0.2
         println("Warning: T is not unitary")
         mark_with_x = true 
@@ -494,11 +660,7 @@ function calculate_interlayer_hopping_amplitude(N,K,flux_site)
     X_xy , Y_xy = get_X_and_Y(T_xy)
     X , Y = get_X_and_Y(T)
 
-    scaling = 1
-
-    X = scaling*X
-
-    M = scaling*inv(X)*Y
+    M = inv(X)*Y
 
     if det(X) < 10^(-10)
         println("Warning: det(X) is very small, inv(X) is likely to be very large")
@@ -513,7 +675,7 @@ function calculate_interlayer_hopping_amplitude(N,K,flux_site)
     #display(det(X))
     #display(det(X'))
     #display(det(X)*det(X'))
-    C = (det(X)*det(X'))^(1/4)*(scaling)^(-N^2/2)
+    C = (det(X)*det(X'))^(1/4)
 
 
     i = convert_lattice_vector_to_index(flux_site,N)
@@ -525,13 +687,12 @@ function calculate_interlayer_hopping_amplitude(N,K,flux_site)
     hopping_amp = (C^2)*(1+(-a_init[i,:]'*M*b_init[j,:] + a_init[i,:]'*b_init[j,:])^2)
 
     return hopping_amp , mark_with_x
-    =#
 end 
 
 function plot_interlayer_hopping_vs_system_size(K,N_max)
     hopping_amp_vec = zeros(1,N_max)
     for N = 4:N_max
-        hopping_amp_vec[N] , mark_with_x = calculate_interlayer_hopping_amplitude(N,K)
+        hopping_amp_vec[N] , mark_with_x = calculate_interlayer_hopping_amplitude(N,K,[2,2])
         if mark_with_x == false
             scatter(1/N,hopping_amp_vec[N],color = "blue")
         else
@@ -548,45 +709,6 @@ function plot_interlayer_hopping_vs_system_size(K,N_max)
     end 
 end
 
-
-
-#=
-function form_A_matrix(N)
-    diag_block = zeros(N,N)
-    for j = 1:(N-1)
-        diag_block[j,j]=1
-        diag_block[j+1,j]=1
-    end
-    diag_block[N,N] = 1
-
-    A = zeros(N^2,N^2)
-    for j = 1:(N-1)
-        A[(1+(j-1)*N):(j*N),(1+(j-1)*N):(j*N)] = diag_block
-        A[(1+(j-1)*N):(j*N),(1+(j)*N):((j+1)*N)] = Matrix(I,N,N)
-    end 
-    A[(1+N^2-N):N^2,(1+N^2-N):N^2] = diag_block
-
-    return A 
-end 
-
-function form_B_matrix(N)
-    B = zeros(N^2,N^2)
-    for j = 1:N
-        B[N^2-N+j,j*N] = 1
-    end 
-
-    return B 
-end 
-
-function form_C_matrix(N)
-    C = zeros(N^2,N^2)
-    for j=1:N
-        C[(1+(j-1)*N),j] = 1
-    end 
-
-    return C 
-end
-=#
 
 #=
 This final section of code is an attempt to use the  3 fold rotation symmetry of the ground state to reduce the Hamiltonian to block diagonal form before diagonalising. 
