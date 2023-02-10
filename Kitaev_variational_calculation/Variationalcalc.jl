@@ -66,8 +66,8 @@ half_BZ = brillouinzone(g1,g2,N,true)
 Large_BZ = brillouinzone(g1,g2,100,false)
 
 
-#=
-This section uses the old ordering of the sites, where the periodic boundary conditions are implemented using the basis (n1,n2)
+
+#This section uses the old ordering of the sites, where the periodic boundary conditions are implemented using the basis (n1,n2)
 function get_H0(N,K=1)
     """
     Calculates a 2N^2 x 2N^2 matrix H0 which is the Hamiltonian for a flux free Kitaev model in terms of complex matter fermions. 
@@ -85,6 +85,7 @@ function get_H0(N,K=1)
     end 
     A[N,N] = K
     A[1,N] = K
+    B[N,N] = K 
 
     
 
@@ -104,7 +105,7 @@ function get_H0(N,K=1)
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return H
+    return Matrix(H)
 end
 
 function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
@@ -225,7 +226,19 @@ end
 
 function convert_lattice_vector_to_index(lattice_vector,N)
     index = 1 + lattice_vector[1] + N*lattice_vector[2]
-    return index
+    return Int(index)
+end 
+
+function convert_index_to_lattice_vector(index,N)
+    if index % N == 0 
+        n1 = Int(N-1)
+        n2 = Int(index/N -1)
+    else
+        n2 = Int(floor(index/N))
+        n1 = Int(index - n2*N -1)
+    end 
+
+    return [n1,n2]
 end 
 
 function find_flipped_bond_coordinates(H)
@@ -274,8 +287,11 @@ function find_flipped_bond_coordinates(H)
         println("flipped bond at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $bond_flavour")
     end 
 end 
-=#
 
+
+
+#=
+# This section uses a different ordering of sites
 function get_H0(N,K=1)
     """
     Calculates a 2N^2 x 2N^2 matrix H0 which is the Hamiltonian for a flux free Kitaev model in terms of complex matter fermions. 
@@ -311,8 +327,151 @@ function get_H0(N,K=1)
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
+    H= Matrix(H)
     return H
 end
+
+function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
+    """
+    Creates a 2N^2 x 2N^2 Hamiltonian matrix for a flux sector with a single flux pair. 
+    The flux pair is located at the lattice site flux_site which is given as a coordinate [n1,n2] = n1*a1 + n2*a2 where a1,a2 are plvs. 
+    The lattice sites are numbered such that an A site at [n1,n2] is given the index 1 + n1 + N*n2 
+    The B lattice sites are numbered such that the B site connected to A via a z bond is given the same number. 
+    flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z".
+
+    The matrix H is calculated using the following steps:
+    - Calculate the matrix M which descibes H in terms of Majorana fermions:
+        0.5[C_A C_B][ 0 M ; -M 0][C_A C_B]^T
+        
+        - M is initially calculated in the same way as for H0 
+        - A flipped bond variable (equivalent to adding flux pair) is added
+        - flux_site specifies the A sublattice site, which specifies the row of M on which the variable is flipped, via C_A_index = 1 + n1 + n2*N
+        - flux_flavour specifies the neighbouring B sublattice site, which specifies the column of M on which the variable is flipped 
+    
+    - Use M to calculate H in the basis of complex matter fermions:
+        C_A = f + f'
+        C_B = i(f'-f)
+
+    returns:
+    - A 2N^2 x 2N^2 sparse matrix Hamiltonian in the complex matter fermion basis 
+
+    """
+
+    H0 = get_H0(N,K)
+
+    HF = flip_bond_variable(H0,flux_site,flux_flavour)
+
+    return HF
+
+end 
+
+function find_flipped_bond_coordinates(H)
+    """
+    Assumes the Hamiltonian contains only a single flipped bond. 
+    Finds the coordinate of the flipped bond site in the form [n1,n2] = n1*a1 + n2*a2
+    """
+
+    N = Int(sqrt(size(H)[1]/2))
+    h = H[1:N^2,1:N^2]
+    Delta = H[1:N^2,(1+N^2):2*N^2]
+
+    M = 0.5*(h-Delta)
+
+    K = sign(sum(M))
+
+    bond_indicies_set = findall(x->x==-K,M)
+    
+    for bond_indicies in bond_indicies_set
+        C_A_index = bond_indicies[1]
+        if C_A_index % N == 0 
+            C_A_n2 = Int(C_A_index/N -1)
+            C_A_n1 = Int(N-1) + C_A_n2
+        else
+            C_A_n2 = Int(floor(C_A_index/N))
+            C_A_n1 = Int(C_A_index - C_A_n2*N -1 + C_A_n2)
+        end 
+
+        C_B_index = bond_indicies[2]
+        if C_B_index % N == 0 
+            C_B_n2 = Int(C_B_index/N -1) 
+            C_B_n1 = Int(N-1) + C_B_n2
+        else
+            C_B_n2 = Int(floor(C_B_index/N))
+            C_B_n1 = Int(C_B_index - C_B_n2*N -1 + C_B_n2) 
+        end 
+
+        if C_A_index == C_B_index
+            bond_flavour = "z"
+        elseif C_B_n1 == C_A_n1 
+            bond_flavour = "y"
+        elseif C_B_n2 == C_A_n2
+            bond_flavour = "x"
+        end
+        
+        println("flipped bond at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $bond_flavour")
+    end 
+end 
+
+function convert_lattice_vector_to_index(lattice_vector,N)
+    index = 1 + lattice_vector[1] - lattice_vector[2] + N*lattice_vector[2]
+    return index
+end 
+
+function convert_index_to_lattice_vector(index,N)
+    
+    if index % N == 0 
+        n2 = Int(index/N -1)
+        n1 = Int(N-1) + n2
+    else
+        n2 = Int(floor(index/N))
+        n1 = Int(index - n2*N -1 + n2)
+    end 
+
+    return [n1,n2]
+end 
+
+function flip_bond_variable(H,bond_site,bond_flavour)
+    N = Int(sqrt(size(H)[1]/2))
+
+    M = get_M_from_H(H)
+
+    C_A_index = 1 + bond_site[1] - bond_site[2] + N*bond_site[2]
+
+    if bond_flavour == "z"
+        C_B_index = C_A_index
+    elseif bond_flavour == "y"
+        if bond_site[2] == N - 1
+            if bond_site[1] == bond_site[2]
+                C_B_index = N
+            else
+                C_B_index = bond_site[1]-bond_site[2]
+            end 
+        elseif bond_site[1] == bond_site[2]
+            C_B_index = C_A_index + 2*N - 1
+        else
+            C_B_index = C_A_index + N - 1 
+        end 
+    else
+        if bond_site[1] == bond_site[2] 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    M[C_A_index,C_B_index] = - M[C_A_index,C_B_index]
+
+    H = zeros(2*N^2,2*N^2)
+
+    H[1:N^2,1:N^2] = M + transpose(M)
+    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
+    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
+    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
+
+    return H 
+end 
+=#
+
 
 function diagonalise_sp(H)
     """
@@ -362,40 +521,6 @@ function diagonalise(H)
     T = [X Y ; Y X]
 
     return energies , T 
-end 
-
-function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
-    """
-    Creates a 2N^2 x 2N^2 Hamiltonian matrix for a flux sector with a single flux pair. 
-    The flux pair is located at the lattice site flux_site which is given as a coordinate [n1,n2] = n1*a1 + n2*a2 where a1,a2 are plvs. 
-    The lattice sites are numbered such that an A site at [n1,n2] is given the index 1 + n1 + N*n2 
-    The B lattice sites are numbered such that the B site connected to A via a z bond is given the same number. 
-    flux_flavour specifies the type of bond which connects the fluxes in the pair. It is given as a string, either "x","y" or "z".
-
-    The matrix H is calculated using the following steps:
-    - Calculate the matrix M which descibes H in terms of Majorana fermions:
-        0.5[C_A C_B][ 0 M ; -M 0][C_A C_B]^T
-        
-        - M is initially calculated in the same way as for H0 
-        - A flipped bond variable (equivalent to adding flux pair) is added
-        - flux_site specifies the A sublattice site, which specifies the row of M on which the variable is flipped, via C_A_index = 1 + n1 + n2*N
-        - flux_flavour specifies the neighbouring B sublattice site, which specifies the column of M on which the variable is flipped 
-    
-    - Use M to calculate H in the basis of complex matter fermions:
-        C_A = f + f'
-        C_B = i(f'-f)
-
-    returns:
-    - A 2N^2 x 2N^2 sparse matrix Hamiltonian in the complex matter fermion basis 
-
-    """
-
-    H0 = get_H0(N,K)
-
-    HF = flip_bond_variable(H0,flux_site,flux_flavour)
-
-    return HF
-
 end 
 
 function get_X_and_Y(T)
@@ -528,53 +653,6 @@ function get_M_from_H(H)
     return M
 end 
 
-function find_flipped_bond_coordinates(H)
-    """
-    Assumes the Hamiltonian contains only a single flipped bond. 
-    Finds the coordinate of the flipped bond site in the form [n1,n2] = n1*a1 + n2*a2
-    """
-
-    N = Int(sqrt(size(H)[1]/2))
-    h = H[1:N^2,1:N^2]
-    Delta = H[1:N^2,(1+N^2):2*N^2]
-
-    M = 0.5*(h-Delta)
-
-    K = sign(sum(M))
-
-    bond_indicies_set = findall(x->x==-K,M)
-    
-    for bond_indicies in bond_indicies_set
-        C_A_index = bond_indicies[1]
-        if C_A_index % N == 0 
-            C_A_n2 = Int(C_A_index/N -1)
-            C_A_n1 = Int(N-1) + C_A_n2
-        else
-            C_A_n2 = Int(floor(C_A_index/N))
-            C_A_n1 = Int(C_A_index - C_A_n2*N -1 + C_A_n2)
-        end 
-
-        C_B_index = bond_indicies[2]
-        if C_B_index % N == 0 
-            C_B_n2 = Int(C_B_index/N -1) 
-            C_B_n1 = Int(N-1) + C_B_n2
-        else
-            C_B_n2 = Int(floor(C_B_index/N))
-            C_B_n1 = Int(C_B_index - C_B_n2*N -1 + C_B_n2) 
-        end 
-
-        if C_A_index == C_B_index
-            bond_flavour = "z"
-        elseif C_B_n1 == C_A_n1 
-            bond_flavour = "y"
-        elseif C_B_n2 == C_A_n2
-            bond_flavour = "x"
-        end
-        
-        println("flipped bond at R = $C_A_n1 a1 + $C_A_n2 a2 with flavour $bond_flavour")
-    end 
-end 
-
 function calculate_yz_Gamma_hopping_amplitude(N,K)
 
     mark_with_x = false
@@ -625,11 +703,6 @@ function calculate_yz_Gamma_hopping_amplitude(N,K)
     return hopping_amp , mark_with_x
 end 
 
-function convert_lattice_vector_to_index(lattice_vector,N)
-    index = 1 + lattice_vector[1] - lattice_vector[2] + N*lattice_vector[2]
-    return index
-end 
-
 function plot_Gamma_hopping_vs_system_size(K,N_max)
     hopping_amp_vec = zeros(1,N_max)
     for N = 4:N_max
@@ -649,47 +722,6 @@ function plot_Gamma_hopping_vs_system_size(K,N_max)
         ylabel("FM Kitaev term")
     end 
 end
-
-function flip_bond_variable(H,bond_site,bond_flavour)
-    N = Int(sqrt(size(H)[1]/2))
-
-    M = get_M_from_H(H)
-
-    C_A_index = 1 + bond_site[1] - bond_site[2] + N*bond_site[2]
-
-    if bond_flavour == "z"
-        C_B_index = C_A_index
-    elseif bond_flavour == "y"
-        if bond_site[2] == N - 1
-            if bond_site[1] == bond_site[2]
-                C_B_index = N
-            else
-                C_B_index = bond_site[1]-bond_site[2]
-            end 
-        elseif bond_site[1] == bond_site[2]
-            C_B_index = C_A_index + 2*N - 1
-        else
-            C_B_index = C_A_index + N - 1 
-        end 
-    else
-        if bond_site[1] == bond_site[2] 
-            C_B_index = C_A_index + N -1
-        else 
-            C_B_index = C_A_index -1 
-        end 
-    end 
-
-    M[C_A_index,C_B_index] = - M[C_A_index,C_B_index]
-
-    H = zeros(2*N^2,2*N^2)
-
-    H[1:N^2,1:N^2] = M + transpose(M)
-    H[(N^2+1):2*N^2,1:N^2] = M - transpose(M)
-    H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
-    H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
-
-    return H 
-end 
 
 function calculate_z_Heisenberg_hopping_matrix_element_2(N,K)
 
@@ -821,7 +853,7 @@ end
 function aligned_flux_pair_creation_amplitude(n,m,op_dict,M,C)
 
     N = Int(sqrt(size(M)[1]))
-    i0 = Int(convert_lattice_vector_to_index([round(N/2),N],N))
+    i0 = Int(convert_lattice_vector_to_index([round(N/2),round(N/2)],N))
     
     amplitude = -two_fermion_matrix_element(["cA","f'"],[i0,n],op_dict,M,C)*two_fermion_matrix_element(["cA","f'"],[i0,m],op_dict,M,C)
     -two_fermion_matrix_element(["cB","f'"],[i0,n],op_dict,M,C)*two_fermion_matrix_element(["cB","f'"],[i0,m],op_dict,M,C)
@@ -829,16 +861,71 @@ function aligned_flux_pair_creation_amplitude(n,m,op_dict,M,C)
     return amplitude
 end 
 
+function aligned_isolated_flux_pair_creation_amplitude(m,n,op_dict,M,C)
+    """
+    Calculates the amplitude for two isolated flux pairs to be created directly above each other from Majorana fermions on each layer.
+    This is amplitude T^H_mn* in the notes. 
+    """
+
+    N = Int(sqrt(size(M)[1]))
+    i0 = Int(convert_lattice_vector_to_index([round(N/2),round(N/2)],N))
+    
+    amplitude = -two_fermion_matrix_element(["f^u2","cA"],[m,i0],op_dict,M,C)*two_fermion_matrix_element(["f^u2","cA"],[n,i0],op_dict,M,C)
+    -two_fermion_matrix_element(["f^u2","cB"],[m,i0],op_dict,M,C)*two_fermion_matrix_element(["f^u2","cB"],[n,i0],op_dict,M,C)
+
+    return amplitude
+end
+
 function aligned_flux_pair_hopping_amplitude(n,m,k,l,op_dict,M,C)
 
     N = Int(sqrt(size(M)[1]))
-    j0 = Int(convert_lattice_vector_to_index([round(N/2),N],N))
-    i2 = Int(convert_lattice_vector_to_index([round(N/2),N-1],N))
+    j0 = Int(convert_lattice_vector_to_index([round(N/2),round(N/2)],N))
+    i2 = Int(convert_lattice_vector_to_index([round(N/2),round(N/2)-1],N))
 
     amplitude = - four_fermion_matrix_element(["f^u2","cA","cB","f'"],[m,i2,j0,l],op_dict,M,C)*four_fermion_matrix_element(["f^u2","cA","cB","f'"],[n,i2,j0,k],op_dict,M,C)
     - two_fermion_matrix_element(["f^u2","f'"],[m,l],op_dict,M,C)two_fermion_matrix_element(["f^u2","f'"],[n,k],op_dict,M,C)
 
     return amplitude
+end 
+
+function calculate_amplitude_arrays(Num_states,N,K)
+    """
+    This calculates the hopping amplitude matrix for a system of NxN unit cells 
+    """
+    initial_flux_site =[Int(round(N/2)),Int(round(N/2))]
+    initial_flux_flavour = "z"
+    final_flux_site = [Int(round(N/2))+1,Int(round(N/2))]
+    final_flux_flavour = "x"
+
+    H0 = get_H0(N,K)
+    initial_H = flip_bond_variable(H0,initial_flux_site,initial_flux_flavour)
+    final_H = flip_bond_variable(H0,final_flux_site,final_flux_flavour)
+
+    initial_E , initial_T = diagonalise(initial_H)
+    final_E , final_T = diagonalise(final_H)
+
+    T = initial_T*final_T'
+    X,Y = get_X_and_Y(T)
+    M = inv(X)*Y
+    C = det(X'*X)^(1/4)
+
+    op_dict = form_operator_dictionary(T,initial_T)
+
+    hopping_amplitude_array = zeros(Num_states,Num_states,Num_states,Num_states)
+    creation_amplitude_array = zeros(Num_states,Num_states)
+
+    for n = 1:Num_states
+        for m = 1:Num_states
+            for k = 1:Num_states
+                for l = 1:Num_states
+                    hopping_amplitude_array[n,m,k,l] = aligned_flux_pair_hopping_amplitude(N^2+1-n,N^2+1-m,N^2+1-k,N^2+1-l,op_dict,M,C)
+                end 
+            end 
+            creation_amplitude_array[n,m] = aligned_flux_pair_creation_amplitude(N^2+1-n,N^2+1-m,op_dict,M,C)
+        end 
+    end 
+
+    return hopping_amplitude_array , creation_amplitude_array ,final_E
 end 
 
 function get_Kagome_Hamiltonian(k,hop_amp)
@@ -855,21 +942,31 @@ function get_Kagome_Hamiltonian(k,hop_amp)
     return Hermitian(H_kagome)
 end
 
-Num_states = 7
-Energies = LinRange(0,0.1,Num_states)
-hopping_amplitude_matrix = 0.005*randn(Num_states,Num_states,Num_states,Num_states)
+#=
+N = 35
+Num_states = 1
+hopping_amplitude_array , creation_amplitude_array, E = calculate_amplitude_arrays(Num_states,N,-1)
+#E = reverse(E[(N^2-Num_states+1):N^2])
+display(E)
+=#
 
-for i = 1:Num_states
-    for j = 1:Num_states
-        for k = 1:Num_states
-            for l = 1:Num_states
-                hopping_amplitude_matrix[j,i,l,k]=hopping_amplitude_matrix[i,j,k,l]
-                hopping_amplitude_matrix[k,l,i,j]=hopping_amplitude_matrix[i,j,k,l]'
-                hopping_amplitude_matrix[l,k,j,i]=hopping_amplitude_matrix[i,j,k,l]'
-            end 
+function calculate_energy_shift(creation_amplitude_array,hopping_amplitude_array,Energies)
+    N = Int(size(Energies)[1])
+
+    Delta = 0.26 
+    energy_shift = 0 
+
+    for n = 1:N
+        for m = 1:N
+            H0 = get_Kagome_Hamiltonian([0,0],hopping_amplitude_array[n,m,n,m]) + (Delta + Energies[n]+Energies[m])*Matrix(I,3,3)
+            energy_shift -= (creation_amplitude_array[n,m]^2)*sum(inv(H0))
         end 
     end 
+    return real(energy_shift)
 end 
+
+#E_shift = calculate_energy_shift(creation_amplitude_array,hopping_amplitude_array,E)
++
 
 function get_full_effective_Hamiltonian(k,Energies,hopping_amplitude_matrix)
     N = Int(size(Energies)[1])
@@ -965,6 +1062,63 @@ function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes=gca())
     axes.set_ylabel("Energy")
     axes.vlines([0,K_index,M_index,Num_k_points],-(1.1*E_max),1.1*E_max,linestyle="dashed")
 end
+
+function calculate_number_density_at_site(site,T_u,ex_id)
+    X , Y = get_X_and_Y(T_u)
+
+    N = Int(sqrt(size(X)[1]))
+    i0 = convert_lattice_vector_to_index(site,N)
+    
+    
+    number_density =  X'[i0,ex_id]*X'[i0,ex_id] - Y'[i0,ex_id]*Y'[i0,ex_id] #+ sum(Y'[i0,:].^2)
+
+    #display(dot(Y[i0,:],conj.(Y[i0,:])))
+    return number_density
+end 
+
+function plot_eigenstate_fermion_density(T,ex_id,size_scale=10,colour="b")
+    N = Int(sqrt(size(T)[1]/2))
+    lattice = zeros(2,N^2)
+    num_density_vector = zeros(1,N^2)
+
+    excitation_number = N^2+1 -ex_id
+
+    for i = 1:N^2
+        site = convert_index_to_lattice_vector(i,N)
+        num_density = calculate_number_density_at_site(site,T,excitation_number)
+
+        real_space_coords = site[1]*a1 + site[2]*a2
+
+        lattice[:,i] = real_space_coords
+
+        num_density_vector[1,i] = num_density
+    end
+
+    scatter(lattice[1,:],lattice[2,:],sizes = size_scale*num_density_vector[1,:],color=colour)
+    scatter(lattice[1,:].+N*a1[1],lattice[2,:].+N*a1[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
+    scatter(lattice[1,:].+N*a2[1],lattice[2,:].+N*a2[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
+    scatter(lattice[1,:].+N*(a1[1]+a2[1]),lattice[2,:].+N*(a1[2]+a2[2]),sizes = size_scale*num_density_vector[1,:],color=colour)
+    scatter(lattice[1,:].-N*a2[1],lattice[2,:].-N*a2[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
+    scatter(lattice[1,:].-N*a1[1],lattice[2,:].-N*a1[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
+
+    xlim(0,2*N*a1[1])
+    ylim(-N*a1[2],N*a1[2])
+
+    if ex_id%10 == 1 
+        th = "st"
+    elseif ex_id%10 ==2
+        th = "nd"
+    elseif ex_id%10 ==3
+        th = "rd"
+    else
+        th ="th"
+    end
+
+    title("Number density plot for $ex_id"*"$th Excited state")
+end 
+
+
+
 
 
 #=
