@@ -15,9 +15,9 @@ a1 = [1/2, sqrt(3)/2]
 a2 = [1/2, -sqrt(3)/2]
 
 # sets the nearest neighbour vectors 
-nx = (a1 - a2)/3
-ny = (a1 + 2a2)/3
-nz = -(2a1 + a2)/3
+nz = (a1 - a2)/3
+nx = (a1 + 2a2)/3
+ny = -(2a1 + a2)/3
 
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
@@ -58,14 +58,22 @@ function brillouinzone(g1, g2, N, half=true)
     return [(ix+0.5)*dx + (iy+0.5)*dy for ix in lowerx:upper, iy in lowery:upper]
 end
 
+function lattice(a1,a2,N)
+    return [a1*i+a2*j for i=1:N, j = 1:N]
+end 
+
+function my_brillouinzone(N)
+    BZ = [[n1/N,n2/N] for n1=0:(N-1), n2=0:(N-1)]
+
+    return BZ
+end 
+
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
 N = 24
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
 Large_BZ = brillouinzone(g1,g2,100,false)
-
-
 
 #This section uses the old ordering of the sites, where the periodic boundary conditions are implemented using the basis (n1,n2)
 function get_H0(N,K=1)
@@ -105,7 +113,7 @@ function get_H0(N,K=1)
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return Matrix(H)
+    return 0.5* Matrix(H)
 end
 
 function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
@@ -185,11 +193,14 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return H 
+    return 0.5*H 
 
 end 
 
 function flip_bond_variable(H,bond_site,bond_flavour)
+    """
+    Given a Hamiltonian H this returns a new Hamiltonian with a reversed sign for the bond variable at site bond_site with orientation bond_flavour  
+    """
     N = Int(sqrt(size(H)[1]/2))
 
     M = get_M_from_H(H)
@@ -225,6 +236,9 @@ function flip_bond_variable(H,bond_site,bond_flavour)
 end 
 
 function convert_lattice_vector_to_index(lattice_vector,N)
+    """
+    Given a lattice vector in the form [n1,n2] this assigns an integer according to a specific numbering convention
+    """
     index = 1 + lattice_vector[1] + N*lattice_vector[2]
     return Int(index)
 end 
@@ -243,7 +257,6 @@ end
 
 function find_flipped_bond_coordinates(H)
     """
-    Assumes the Hamiltonian contains only a single flipped bond. 
     Finds the coordinate of the flipped bond site in the form [n1,n2] = n1*a1 + n2*a2
     """
 
@@ -504,6 +517,15 @@ function diagonalise_sp(H)
 end 
 
 function diagonalise(H)
+    """
+    returns:
+    - Eigenvalues of the Hamiltonian as a vector 
+    - A unitary matrix T formed from eigenvectors on the rows such that T*H*T' = [E 0 ; 0 -E]
+    The matrix T has the form: 
+
+    T = [X* Y* ;
+         Y  X ]
+    """
     N_sq = Int(size(H)[1]/2)
 
     H = Matrix(H)
@@ -512,13 +534,13 @@ function diagonalise(H)
     reverse!(energies)
     eigvec = eigvecs(H)
 
-    gamma = [zeros(N_sq,N_sq) Matrix(I,N_sq,N_sq) ; Matrix(I,N_sq,N_sq) zeros(N_sq,N_sq)]
+    gamma = [zeros(N_sq,N_sq) Matrix(I,N_sq,N_sq) ; Matrix(I,N_sq,N_sq) zeros(N_sq,N_sq)] # This reverses the negative eigenvalues so the diagonal matrix has the correct form. 
     eigvec = gamma*eigvec
 
     X = eigvec[1:N_sq,1:N_sq]'
     Y = eigvec[(N_sq+1):2*N_sq,1:N_sq]'
 
-    T = [X Y ; Y X]
+    T = [conj(X)  conj(Y) ; Y X]
 
     return energies , T 
 end 
@@ -532,21 +554,12 @@ function get_X_and_Y(T)
     Y = T[(N_sq+1):2*N_sq,1:N_sq]
 
     return X , Y 
-end 
-
-function get_F_matrix(TF1,TF2)
-    """
-    calculates the matrix F (see Knolle's thesis) used to relate quasi-particle vacua in two different flux sectors 
-    """
-    T = TF2*TF1'
-    X , Y = get_X_and_Y(T)
-
-    F = conj(inv(X)*Y)
-
-    return F 
-end 
+end  
 
 function get_normalisation_constant(TF1,TF2)
+    """
+    Given two transformation matrices TF1 and TF2 which diagonalise the matter sector Hamiltonian in two different flux sectors F1 and F2, this calculates the overlap between the matter sector vacua 
+    """
     T = TF2*TF1'
     X , Y = get_X_and_Y(T)
 
@@ -644,6 +657,9 @@ function plot_Heisenberg_hopping_vs_system_size(K,N_max)
 end
 
 function get_M_from_H(H)
+    """
+    Given a matrix H such that the Hamiltonian is  1/2 [f' f]H[f f']^T this extracts a matrix M which is used to express the Hamiltonian as i/2 [cA cB][0 M; -M^T 0][cA cB]
+    """
     N = Int(sqrt(size(H)[1]/2))
     h = H[1:N^2,1:N^2]
     Delta = H[1:N^2,(1+N^2):2*N^2]
@@ -797,6 +813,8 @@ function calculate_yz_Gamma_hopping_amplitude_2(N,K)
     return hopping_amp , mark_with_x
 end 
 
+#This section contains functions to efficiently calculate Matrix elements  
+
 function form_operator_dictionary(T,T_u1)
     """
     4 types of operators:
@@ -835,6 +853,21 @@ function contract(operator_1,index_1,operator_2,index_2, op_dict, M)
 end 
 
 function four_fermion_matrix_element(op_list,id_list,op_dict,M,C)
+    """
+    Calculates a matrix element of four fermionic operators between two different vacua
+    takes:
+    - op_list a list of operator types given as a vector of strings. The possible choices are: 
+        4 types of operators:
+        - "f^u2" a destruction operator for the left vacuum
+        - "cA" an A site Majorana fermion
+        - "cB" a B site Majorana fermion
+        -  "f'" a creation operator for the right vacuum
+
+    - id_list a vector of 4 integers specifying the index associated to the operator. The order of the indices is the same as the order of the operators in the list
+    - op_dict a dictionary which relates operator types to the matrices used to calculate the matrix element
+    - M   M = inv(X)*Y where X and Y are calculated from the transformation T relating the left and right vacua
+    - C the overlap between the left and right vacua 
+    """
 
     matrix_element = (contract(op_list[1],id_list[1],op_list[2],id_list[2],op_dict,M))*contract(op_list[3],id_list[3],op_list[4],id_list[4],op_dict,M)
     - contract(op_list[1],id_list[1],op_list[3],id_list[3],op_dict,M)*contract(op_list[2],id_list[2],op_list[4],id_list[4],op_dict,M)
@@ -849,6 +882,8 @@ function two_fermion_matrix_element(op_list,id_list,op_dict,M,C)
     matrix_element = C*contract(op_list[1],id_list[1],op_list[2],id_list[2],op_dict,M)
     return matrix_element
 end
+
+#This section contains functions to calculate amplitudes for the bilayer
 
 function aligned_flux_pair_creation_amplitude(n,m,op_dict,M,C)
 
@@ -875,6 +910,54 @@ function aligned_isolated_flux_pair_creation_amplitude(m,n,op_dict,M,C)
 
     return amplitude
 end
+
+function aligned_isolated_flux_pair_hopping_amplitude(initial_site,final_site,op_dict,M,C)
+
+    N = Int(sqrt(size(M)[1]))
+    j0 = Int(convert_lattice_vector_to_index(initial_site,N))
+    i2 = Int(convert_lattice_vector_to_index(final_site,N))
+
+    amplitude_T_B = -two_fermion_matrix_element(["cA","cB"],[i2,j0],op_dict,M,C)^2 - C^2 
+
+    return amplitude_T_B
+end 
+
+function plot_isolated_flux_hopping_amplitude_vs_system_size(K,N_max)
+    for N = 4:N_max
+
+        mark_with_x = "o"
+        H0 = get_H0(N,K)
+
+        initial_flux_site = Int.([round(N/2),round(N/2)])
+        final_flux_site = initial_flux_site + [0,1]
+
+        initial_HF = flip_bond_variable(H0,initial_flux_site,"z")
+        final_HF = flip_bond_variable(H0,initial_flux_site,"x")
+
+        _,initial_T = diagonalise(initial_HF)
+        _,final_T = diagonalise(final_HF) 
+
+        T = initial_T*final_T'
+
+        if abs(sum(T*T')-2*N^2) > 0.2
+            println("Warning: T is not unitary")
+            mark_with_x = "x"
+        end
+
+        X,Y = get_X_and_Y(T)
+        M = inv(X)*Y 
+        C = (det(X'*X))^(1/4)
+
+        op_dict = form_operator_dictionary(T,initial_T)
+
+        amplitude = aligned_isolated_flux_pair_hopping_amplitude(initial_flux_site,final_flux_site,op_dict,M,C)
+
+        scatter(1/N,amplitude,marker = mark_with_x,color="b")
+    end 
+end 
+
+amplitude_T_B = -0.49 # rough estimate for isolated flux pair hopping amplitude on Bilayer model K=1 -0.48 for K=-1 
+
 
 function aligned_flux_pair_hopping_amplitude(n,m,k,l,op_dict,M,C)
 
@@ -928,6 +1011,34 @@ function calculate_amplitude_arrays(Num_states,N,K)
     return hopping_amplitude_array , creation_amplitude_array ,final_E
 end 
 
+function calculate_isolated_flux_pair_creation_array(Num_states,N,K)
+    flux_site =[Int(round(N/2)),Int(round(N/2))]
+    flux_flavour = "z"
+
+    initial_H = get_H0(N,K)
+    final_H = flip_bond_variable(initial_H,flux_site,flux_flavour)
+
+    initial_E , initial_T = diagonalise(initial_H)
+    final_E , final_T = diagonalise(final_H)
+
+    T = initial_T*final_T'
+    X,Y = get_X_and_Y(T)
+    M = inv(X)*Y
+    C = det(X'*X)^(1/4)
+
+    op_dict = form_operator_dictionary(T,initial_T)
+
+    creation_amplitude_array = zeros(Num_states,Num_states)
+
+    for n = 1:Num_states
+        for m = 1:Num_states
+            creation_amplitude_array[m,n] = aligned_isolated_flux_pair_creation_amplitude(N^2+1-m,N^2+1-n,op_dict,M,C)
+        end 
+    end 
+
+    return creation_amplitude_array
+end 
+
 function get_Kagome_Hamiltonian(k,hop_amp)
 
     phi_z = exp(im*dot(k,nn[1]-nn[2]))
@@ -941,6 +1052,45 @@ function get_Kagome_Hamiltonian(k,hop_amp)
 
     return Hermitian(H_kagome)
 end
+
+function calculate_q_parameter(N,K,initial_site = [0,0])
+    """
+    calculates the parameter q from the paper "Theory of the Kitaev model in a [111] magnetic field" which can be used to compare results 
+    """
+    H0 = get_H0(N,K)
+
+    HF_init = flip_bond_variable(H0,initial_site,"y")
+    HF_final = flip_bond_variable(H0,initial_site,"x")
+
+    _ , TF_init = diagonalise(HF_init)
+    _ , TF_final = diagonalise(HF_final)
+
+    T = TF_final*TF_init'
+
+    X,Y = get_X_and_Y(T)
+    C = det(X*X')^(1/4)
+    M = inv(X)*Y 
+
+    op_dict = form_operator_dictionary(T,TF_init)
+
+    j0 = Int(convert_lattice_vector_to_index(initial_site,N))
+    i2 = Int(convert_lattice_vector_to_index(initial_site,N))
+
+    q0 = C 
+    q_prime = two_fermion_matrix_element(["cA","cB"],[i2,j0],op_dict,M,C)
+
+    display(q0)
+    display(q_prime)
+
+    return q0+q_prime
+end 
+
+function plot_q_vs_system_size(N_max,K)
+    for N=4:N_max
+        q = calculate_q_parameter(N,K)
+        scatter(1/N,q)
+    end 
+end 
 
 #=
 N = 35
@@ -966,7 +1116,7 @@ function calculate_energy_shift(creation_amplitude_array,hopping_amplitude_array
 end 
 
 #E_shift = calculate_energy_shift(creation_amplitude_array,hopping_amplitude_array,E)
-+
+
 
 function get_full_effective_Hamiltonian(k,Energies,hopping_amplitude_matrix)
     N = Int(size(Energies)[1])
@@ -991,6 +1141,15 @@ function get_full_effective_Hamiltonian(k,Energies,hopping_amplitude_matrix)
         end 
     end
     return Hermitian(H_full)
+end 
+
+function get_full_isolated_flux_effective_Hamiltonian(k,hopping_amplitude)
+    Delta = 0.26 
+
+    H_full = get_Kagome_Hamiltonian(k,hopping_amplitude)
+    H_full = H_full + 2*Delta*Matrix(I,3,3)
+
+    return H_full
 end 
 
 function get_k_GtoKtoMtoG(Num_points)
@@ -1035,6 +1194,20 @@ function get_bandstructure_GtoKtoMtoG(kGtoKtoMtoG,Energies,hopping_amplitude_mat
     return bands_GtoKtoMtoG
 end
 
+function get_isolated_flux_bandstructure_GtoKtoMtoG(kGtoKtoMtoG,hopping_amplitude)
+    Num_k_points = Int(size(kGtoKtoMtoG)[2])
+
+    bands_GtoKtoMtoG = zeros(3,Num_k_points)
+    
+    for i = 1:Num_k_points
+        k = kGtoKtoMtoG[:,i]
+        H = get_full_isolated_flux_effective_Hamiltonian(k,hopping_amplitude)
+        bands_GtoKtoMtoG[:,i] = eigvals(H)
+    end
+
+    return bands_GtoKtoMtoG
+end
+
 function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes=gca())
     """
     An alternative way to plot the bandstructure (Faster than plot_bands_G_to_K_to_M_to_G) that takes:
@@ -1043,13 +1216,14 @@ function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes=gca())
     - an axis object axes used to add features to the plot such as labels. 
     """
     Num_k_points = Int(size(kGtoKtoMtoG)[2])
+    Num_bands = size(bands_GtoKtoMtoG)[1]
 
     K_index = round(2*Num_k_points/(3+sqrt(3)))
     M_index = round(3*Num_k_points/(3+sqrt(3)))
     
     
     E_max = 0 
-    for i = 1:16 
+    for i = 1:Num_bands
         if E_max < maximum(bands_GtoKtoMtoG[i,:]) 
             E_max = maximum(bands_GtoKtoMtoG[i,:])
         end
@@ -1060,10 +1234,21 @@ function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes=gca())
     axes.set_xticks([0,K_index,M_index,Num_k_points])
     axes.set_xticklabels(["\$\\Gamma\$","K","M","\$\\Gamma\$"])
     axes.set_ylabel("Energy")
-    axes.vlines([0,K_index,M_index,Num_k_points],-(1.1*E_max),1.1*E_max,linestyle="dashed")
+    axes.vlines([0,K_index,M_index,Num_k_points],0,1.1*E_max,linestyle="dashed")
 end
 
+
+# This section contains functions for visualising eigenstates 
 function calculate_number_density_at_site(site,T_u,ex_id)
+    """
+    Calculates the complex matter fermion density at the given lattice site 
+    f_r = cA_r + icB_r
+
+    takes:
+    - A lattice vector given as [n1,n2]
+    - T_u which is a unitary transformation which diagonalises a flux sector Hamiltonian
+    - ex_id which is an integer specifying which excited state to calculate the density for.  
+    """
     X , Y = get_X_and_Y(T_u)
 
     N = Int(sqrt(size(X)[1]))
@@ -1118,6 +1303,236 @@ function plot_eigenstate_fermion_density(T,ex_id,size_scale=10,colour="b")
 end 
 
 
+# This section contains functions to calculate exact eigenstates of the fluxless Kitaev Hamiltonian 
+function phase_factor(k)
+    """
+    Calculates the phase factor Arg( Sum_alpha (e^(ik . r_alpha))) used to calculate exact eigenstates of the fluxless Kitaev model 
+    """
+    phase = 0 
+
+    for nn_vector in nn
+        phase += exp(im*dot(k,nn_vector))
+    end 
+    phase = phase/sqrt(phase*phase')
+    return phase
+end 
+
+function get_T0_exactly(H0)
+    """
+    Calculates the exact transformation T0 which diagonalises the fluxless matter sector Hamiltonian T0*H0*T0' = diagonal 
+    """
+    N = Int(sqrt(size(H0)[1]/2)) 
+
+    T_K = zeros(Complex{Float64},2*N^2,2*N^2)
+
+    T_K[1:N^2,1:N^2] = Matrix(I,N^2,N^2)
+    T_K[1:N^2,(N^2+1):2*N^2] = Matrix(I,N^2,N^2)
+
+    k_lattice = [[n1/N,n2/N] for n1=0:(N-1), n2=0:(N-1)]
+
+    for k_vectors in k_lattice
+        k_id = convert_lattice_vector_to_index(round.(N*k_vectors),N)
+        k = (k_vectors[1])*g1 + (k_vectors[2])*g2
+
+        T_K[(N^2+k_id),k_id]=-im*phase_factor(k)
+        T_K[(N^2+k_id),(N^2+k_id)]=+im*phase_factor(k)
+    end 
+
+    F = get_fourier_matrix(N)
+
+    T0 = ((1/(2)).*[Matrix(I,N^2,N^2) im*Matrix(I,N^2,N^2) ; Matrix(I,N^2,N^2) -im*Matrix(I,N^2,N^2)]*F*T_K)'
+
+    return T0
+end 
+
+function get_fourier_matrix(N)
+    """
+    Calculates a matrix F which can be used to implement a Fourier transform when the Majorana fermions have the form [cA_r cB_r] = F[cA_k cB_k]
+    """
+
+    real_lattice = [[n1,n2] for n1=0:(N-1) , n2 = 0:(N-1)]
+    k_lattice = [[n1/N,n2/N] for n1=0:(N-1), n2=0:(N-1)]
+
+    fourier_matrix = zeros(Complex{Float64},2*N^2,2*N^2)
+
+    for vectors in real_lattice
+        for k_vectors in k_lattice
+
+            R_id = convert_lattice_vector_to_index(vectors,N)
+            R = vectors[1]*a1 + vectors[2]*a2
+
+            k_id = convert_lattice_vector_to_index(round.(N*k_vectors),N)
+            k = (k_vectors[1])*g1 + (k_vectors[2])*g2
+
+            fourier_matrix[R_id,k_id] = exp(-im*dot(k,R))
+            fourier_matrix[N^2+R_id,N^2+k_id] = exp(-im*(dot(k,R+nz)))
+        end 
+    end 
+
+    fourier_matrix = (1/N)*fourier_matrix
+
+    return fourier_matrix
+end 
+
+#=
+function get_HK(N)
+    H0 = get_H0(N)
+    M = get_M_from_H(H0)
+    F = get_fourier_matrix(N)
+    
+    display(size(M))
+    display(size(F))
+
+    H_K = im*F'*[zeros(N^2,N^2) M ; -M' zeros(N^2,N^2)]*F
+
+    return H_K
+end 
+
+function get_TK(N)
+    T_K = zeros(Complex{Float64},2*N^2,2*N^2)
+
+    T_K[1:N^2,1:N^2] = Matrix(I,N^2,N^2)
+    T_K[1:N^2,(N^2+1):2*N^2] = Matrix(I,N^2,N^2)
+
+    k_lattice = [[n1/N,n2/N] for n1=0:(N-1), n2=0:(N-1)]
+
+    for k_vectors in k_lattice
+        k_id = convert_lattice_vector_to_index(round.(N*k_vectors),N)
+        k = (k_vectors[1])*g1 + (k_vectors[2])*g2
+
+        T_K[(N^2+k_id),k_id]=-im*phase_factor(k)
+        T_K[(N^2+k_id),(N^2+k_id)]=+im*phase_factor(k)
+    end 
+
+    T_K = (1/sqrt(2)).*T_K
+    
+    return T_K 
+end 
+=#
+
+#This section contains functions to calculate matrix elements using the exact eigenstates 
+
+function flux_spin_plane_wave_matrix_element(N,K)
+    H0 = get_H0(N,K)
+
+    T0 = get_T0_exactly(H0)
+
+    BZ = my_brillouinzone(N)
+
+    A_matrix_elements = zeros(Complex{Float64},N^2,3)
+    B_matrix_elements = zeros(Complex{Float64},N^2,3)
+
+    for (j,flavour) in enumerate(["x","y","z"])
+
+        HF = flip_bond_variable(H0,[0,0],flavour)
+        _,TF = diagonalise(HF)
+
+        T = TF*T0'
+
+        if abs(sum(T*T')-2*N^2) > 0.2
+            println("Warning: T is not unitary")
+            mark_with_x = true 
+        end
+
+        op_dict = form_operator_dictionary(T,T0)
+
+        X,Y = get_X_and_Y(T)
+        M = inv(X)*Y
+        C = (det(X'*X))^(1/4)
+
+        for k_vec in BZ
+            k_id = convert_lattice_vector_to_index(Int.(round.(N*k_vec)),N)
+
+            A_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cA","f'"],[1,k_id],op_dict,M,C)
+            B_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cB","f'"],[1,k_id],op_dict,M,C)
+        end 
+    end 
+
+    return N*A_matrix_elements, N*B_matrix_elements
+end 
+
+function calculate_hybridisation_amplitudes_TH(N,K)
+    A_ME, B_ME = flux_spin_plane_wave_matrix_element(N,K)
+
+    BZ = my_brillouinzone(N)
+
+    T_H = zeros(Complex{Float64},N^2,N^2,3)
+
+    for k in BZ
+        for q in BZ
+
+            k_id = convert_lattice_vector_to_index(Int.(round.(N*k)),N)
+            q_id = convert_lattice_vector_to_index(Int.(round.(N*q)),N)
+
+            for flavour = [1,2,3]
+    
+                T_H[k_id,q_id,flavour] = A_ME[k_id,flavour]*A_ME[q_id,flavour]+B_ME[k_id,flavour]*B_ME[q_id,flavour]
+            end
+        end 
+    end 
+
+    return T_H
+end 
+
+function get_bandstructure(BZ,hop_amp,TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    bandstructure = Dict()
+    Delta = 0.26
+    H = zeros(Complex{Float64},4,4)
+
+    for Q_vec in BZ
+        
+        Q = Q_vec[1]*g1 + Q_vec[2]*g2
+
+        H[1:3,1:3] = get_Kagome_Hamiltonian(Q,hop_amp)
+        H[1:3,1:3] += [2*Delta 0 0 ; 0 2*Delta 0 ; 0 0 2*Delta]
+
+        bandstructure[Q_vec] = eigvals(H)
+    end 
+
+    return bandstructure
+end 
+
+function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
+    """
+    This plots the bands along the direction between Gamma and M points in the Brillouin Zone
+    This requires:
+    - the bandstructure as a dictionary bandstructure[k] whose entries are the 8 energies for that k vector
+    - the Brillouin zone BZ as a matrix of k vectors 
+    - a boolean argument bilayer which determines whether there are 16 or 8 bands to plot 
+    """
+
+    GtoK = []
+    bands_GtoK = [[] for i = 1:4]
+    for k in BZ 
+        if (k[2] == 0) 
+            push!(GtoK,k)
+            for i in 1:4
+                push!(bands_GtoK[i],bandstructure[k][i])
+            end
+        end 
+    end 
+    kGtoK = collect((1:length(GtoK))*(g1[1]+g2[1])/(2*length(GtoK)))
+    kGtoK = kGtoK .- 0.5*kGtoK[length(GtoK)]*ones(1,length(GtoK))
+
+    for i in 1:4
+        axes.plot(kGtoK,bands_GtoK[i],color="black")
+    end
+
+    #=
+    title( "Between \$\\Gamma\$ and \$ K \$ points")
+    ylabel("Energy")
+    xlabel("Wavevector")
+    =#
+    
+    #This section sets x,y axis limits to make easier comparison to results from "Dynamics of QSL beyond integrability, J. Knolle et al"
+    #=
+    ax = gca()
+    ax[:set_xlim]([3.14,5.3])
+    ax[:set_ylim]([0,1])
+    =#
+end 
 
 
 
