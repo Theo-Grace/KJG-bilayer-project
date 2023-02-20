@@ -113,7 +113,7 @@ function get_H0(N,K=1)
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return 0.5* Matrix(H)
+    return -Matrix(H)
 end
 
 function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
@@ -193,7 +193,7 @@ function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return 0.5*H 
+    return -H 
 
 end 
 
