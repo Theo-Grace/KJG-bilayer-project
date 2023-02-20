@@ -113,7 +113,7 @@ function get_H0(N,K=1)
     H[1:N^2,(N^2+1):2*N^2] = transpose(M) - M 
     H[(N^2+1):2*N^2,(N^2+1):2*N^2] = -M - transpose(M) 
 
-    return -Matrix(H)
+    return Matrix(H)
 end
 
 function get_HF(N,K=1,flux_site=[Int(round(N/2)),Int(round(N/2))],flux_flavour="z")
@@ -639,7 +639,7 @@ end
 function plot_Heisenberg_hopping_vs_system_size(K,N_max)
     hopping_amp_vec = zeros(1,N_max)
     for N = 4:N_max
-        hopping_amp_vec[N] , mark_with_x = calculate_z_Heisenberg_hopping_matrix_element(N,K)
+        hopping_amp_vec[N] , mark_with_x = calculate_z_Heisenberg_hopping_matrix_element_2(N,K)
         if mark_with_x == false
             scatter(1/N,hopping_amp_vec[N],color = "blue")
         else
@@ -650,9 +650,9 @@ function plot_Heisenberg_hopping_vs_system_size(K,N_max)
     xlabel("Inverse of linear system size 1/N")
     ylabel("Heisenberg hopping amplitude")
     if K == 1
-        ylabel("AFM Kitaev term")
+        title("AFM Kitaev term")
     elseif K == -1
-        ylabel("FM Kitaev term")
+        title("FM Kitaev term")
     end 
 end
 
@@ -1143,15 +1143,6 @@ function get_full_effective_Hamiltonian(k,Energies,hopping_amplitude_matrix)
     return Hermitian(H_full)
 end 
 
-function get_full_isolated_flux_effective_Hamiltonian(k,hopping_amplitude)
-    Delta = 0.26 
-
-    H_full = get_Kagome_Hamiltonian(k,hopping_amplitude)
-    H_full = H_full + 2*Delta*Matrix(I,3,3)
-
-    return H_full
-end 
-
 function get_k_GtoKtoMtoG(Num_points)
     """
     Used to create a list of k vectors along the path G to K to M to G in the Brillouin zone. 
@@ -1304,14 +1295,14 @@ end
 
 
 # This section contains functions to calculate exact eigenstates of the fluxless Kitaev Hamiltonian 
-function phase_factor(k)
+function phase_factor(k,K)
     """
     Calculates the phase factor Arg( Sum_alpha (e^(ik . r_alpha))) used to calculate exact eigenstates of the fluxless Kitaev model 
     """
     phase = 0 
 
     for nn_vector in nn
-        phase += exp(im*dot(k,nn_vector))
+        phase += K*exp(im*dot(k,nn_vector))
     end 
     phase = phase/sqrt(phase*phase')
     return phase
@@ -1322,6 +1313,9 @@ function get_T0_exactly(H0)
     Calculates the exact transformation T0 which diagonalises the fluxless matter sector Hamiltonian T0*H0*T0' = diagonal 
     """
     N = Int(sqrt(size(H0)[1]/2)) 
+
+    K = sign(sum(get_M_from_H(H0)))
+    display(K)
 
     T_K = zeros(Complex{Float64},2*N^2,2*N^2)
 
@@ -1334,8 +1328,8 @@ function get_T0_exactly(H0)
         k_id = convert_lattice_vector_to_index(round.(N*k_vectors),N)
         k = (k_vectors[1])*g1 + (k_vectors[2])*g2
 
-        T_K[(N^2+k_id),k_id]=-im*phase_factor(k)
-        T_K[(N^2+k_id),(N^2+k_id)]=+im*phase_factor(k)
+        T_K[(N^2+k_id),k_id]=-im*phase_factor(k,K)
+        T_K[(N^2+k_id),(N^2+k_id)]=+im*phase_factor(k,K)
     end 
 
     F = get_fourier_matrix(N)
@@ -1424,7 +1418,7 @@ function flux_spin_plane_wave_matrix_element(N,K)
 
     for (j,flavour) in enumerate(["x","y","z"])
 
-        HF = flip_bond_variable(H0,[0,0],flavour)
+        HF = flip_bond_variable(H0,[1,1],flavour)
         _,TF = diagonalise(HF)
 
         T = TF*T0'
@@ -1439,7 +1433,7 @@ function flux_spin_plane_wave_matrix_element(N,K)
         X,Y = get_X_and_Y(T)
         M = inv(X)*Y
         C = (det(X'*X))^(1/4)
-
+        
         for k_vec in BZ
             k_id = convert_lattice_vector_to_index(Int.(round.(N*k_vec)),N)
 
@@ -1506,7 +1500,7 @@ function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
     GtoK = []
     bands_GtoK = [[] for i = 1:4]
     for k in BZ 
-        if (k[2] == 0) 
+        if (k[2] == k[1]) 
             push!(GtoK,k)
             for i in 1:4
                 push!(bands_GtoK[i],bandstructure[k][i])
@@ -1534,7 +1528,23 @@ function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
     =#
 end 
 
+function get_full_isolated_flux_effective_Hamiltonian(Q_vec,delta_k_vec,hopping_amplitude,TH)
+    Delta = 0.26 
+    N = Int(sqrt(size(TH)[1]))
 
+    Q = g1*Q_vec[1] + g2*Q_vec[2]
+
+    H_full = zeros(Complex{Float64},4,4)
+    H_full[1:3,1:3] = get_Kagome_Hamiltonian(Q,hopping_amplitude)
+    H_full[1:3,1:3] += 2*Delta*Matrix(I,3,3)
+
+    k_id = convert_lattice_vector_to_index(Int.(round.(N*(Q_vec./2 +delta_k_vec))),N)
+    q_id = convert_lattice_vector_to_index(Int.(round.(N*(Q_vec./2 -delta_k_vec))),N)
+
+    H_full[1:3,4] = TH[k_id,q_id,:]
+
+    return Hermitian(H_full)
+end 
 
 #=
 This final section of code is an attempt to use the  3 fold rotation symmetry of the ground state to reduce the Hamiltonian to block diagonal form before diagonalising. 
