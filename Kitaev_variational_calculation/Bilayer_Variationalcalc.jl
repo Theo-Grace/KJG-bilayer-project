@@ -64,6 +64,88 @@ function my_brillouinzone(N)
     return BZ
 end 
 
+function get_hex_lattice(N)
+    hex_lattice = []
+    for j  = 0:N
+        for i = 0:((2*N)-j)
+            push!(hex_lattice,[-N+j+i,N-i]+[0,1])
+        end 
+        for i = 0:(N+1+j)
+            push!(hex_lattice,[(-N-1)+i,j-i]+[0,1])
+        end 
+    end 
+    return hex_lattice
+end 
+
+function convert_hex_index_to_vec(id,N)
+
+    R = [-0.5 -sqrt(3)/2 ; sqrt(3)/2 -0.5]
+
+    if id <= N^2 
+        display(id)
+        n2 = -floor((id-1)/(N))
+        n1 = id + N*n2 -1
+
+        hex_vec = [n1,n2]
+    elseif N^2 < id <= 2*N^2
+        display(id-N^2)
+        n2 = -floor((id-N^2-1)/(N))
+        n1 = id-N^2 + N*n2 -1
+
+        RL = convert_vec_to_RL([n1,n2])
+        hex_vec = convert_RL_to_vec(R*(RL+ny)-ny ) 
+    elseif 2*N^2 < id <= 3*N^2 
+        n2 = -floor((id-2*N^2-1)/(N))
+        n1 = id-2*N^2 + N*n2 -1
+
+        RL = convert_vec_to_RL([n1,n2])
+        hex_vec = convert_RL_to_vec(R'*(RL+ny)-ny ) 
+    else
+        println("Error: Index out of range")
+    end     
+
+    return hex_vec 
+
+end 
+
+function convert_vec_to_hex_index(vec,N)
+    n1 = vec[1]
+    n2 = vec[2]
+
+    alpha = 0 
+    while !((0<= n1) && (n1<N) && (-N<n2) && (n2<=0))
+
+        RL = convert_vec_to_RL([n1,n2])
+        hex_vec = convert_RL_to_vec(R'*(RL+ny)-ny)
+        n1 = hex_vec[1]
+        n2 = hex_vec[2]
+
+        if alpha ==3
+            println("Error: given vector is not within the specified hexagon")
+            return NaN
+            break
+        end 
+        alpha += 1 
+    end 
+
+    id = 1 + n1 - n2*N + alpha*N^2 
+
+    return id 
+end 
+
+function convert_RL_to_vec(R)
+    n1 = Int(round((dot(R,a1)-dot(R,a2)*dot(a2,a1))/(1-dot(a1,a2)^2)))
+    n2 = Int(round((dot(R,a2)-dot(R,a1)*dot(a1,a2))/(1-dot(a1,a2)^2)))
+
+    return [n1,n2]
+end
+
+function convert_vec_to_RL(vec)
+    RL = vec[1]*a1 + vec[2]*a2
+
+    return RL 
+end 
+
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
 g1, g2 = dual(a1,a2)
 
