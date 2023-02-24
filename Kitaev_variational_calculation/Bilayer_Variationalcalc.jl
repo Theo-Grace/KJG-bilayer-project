@@ -700,6 +700,106 @@ function calculate_hybridisation_amplitudes_TH(N,K)
     return T_H
 end 
 
+# This section adds functions to calculate hopping matrix elements 
+
+function calculate_hopping_amplitudes(N,K,flux_site)
+    H0 = get_H0(N,K)
+
+    #flux_site = [0,0]
+    flavours = ["x","y","z"]
+
+    r = convert_lattice_vector_to_index(flux_site,N)
+    r_x = convert_lattice_vector_to_index(flux_site+[-1,0],N)
+    r_y = convert_lattice_vector_to_index(flux_site+[0,-1],N)
+    r_vec = [r_x,r_y,r]
+
+    TF_vec = []
+
+    hop_amp_matrix = zeros(3,3)
+
+    for (j,flavour) in enumerate(flavours) 
+        HF = flip_bond_variable(H0,flux_site,flavour)
+        _,TF = diagonalise(HF)
+        push!(TF_vec,TF)
+        println(flavour)
+    end 
+
+    for i = 1:3
+        for j in setdiff([1,2,3],i)
+            TF_init = TF_vec[i]
+            TF_final = TF_vec[j]
+
+            T = TF_final*TF_init'
+
+            X,Y = get_X_and_Y(T)
+
+            M = inv(X)*Y 
+            C = det(X'*X)^(1/4)
+
+            op_dict = form_operator_dictionary(T,TF_init)
+
+            hop_amp_matrix[i,j] = -(C^2 + two_fermion_matrix_element(["cA","cB"],[r,r_vec[setdiff([1,2,3],[i,j])[1]]],op_dict,M,C)^2)
+
+            display(two_fermion_matrix_element(["cA","cB"],[r,r_vec[setdiff([1,2,3],[i,j])[1]]],op_dict,M,C))
+
+        end 
+    end 
+
+    return hop_amp_matrix
+end 
+# The hopping amplitudes are ~ 0.9 for K = +/- 1 
+
+function calculate_off_site_hopping_amplitudes(N,K,flux_site)
+    H0 = get_H0(N,K)
+
+    #flux_site = [0,0]
+    flavours = ["x","y","z"]
+
+    tz = [1/3,1/3]
+    ty = [1/3,-2/3]
+    tx = [-2/3, 1/3]
+    t = [tx,ty,tz]
+
+    r = convert_lattice_vector_to_index(flux_site,N)
+    r_x = convert_lattice_vector_to_index(flux_site+[-1,0],N)
+    r_y = convert_lattice_vector_to_index(flux_site+[0,-1],N)
+    r_vec = [r_x,r_y,r]
+
+    hop_amp_matrix = zeros(3,3)
+
+    for alpha = 1:3
+        for beta in setdiff([1,2,3],alpha)
+            gamma = setdiff([1,2,3],[alpha,beta])[1]
+
+            site_init = Int.(round.(flux_site + t[gamma] - t[alpha]))
+            site_final =Int.(round.(flux_site + t[gamma] - t[beta]))
+
+            HF_init = flip_bond_variable(H0,site_init,flavours[alpha])
+            HF_final = flip_bond_variable(H0,site_final,flavours[beta])
+
+            _,TF_init = diagonalise(HF_init)
+            _,TF_final = diagonalise(HF_final)
+
+            T = TF_final*TF_init'
+
+            X,Y = get_X_and_Y(T)
+
+            M = inv(X)*Y 
+            C = det(X'*X)^(1/4)
+
+            op_dict = form_operator_dictionary(T,TF_init)
+
+            hop_amp_matrix[alpha,beta] = -(C^2 + two_fermion_matrix_element(["cA","cB"],[r,r_vec[gamma]],op_dict,M,C)^2)
+
+            display(two_fermion_matrix_element(["cA","cB"],[r,r_vec[gamma]],op_dict,M,C))
+
+        end 
+    end 
+
+    return hop_amp_matrix
+end 
+
+
 function get_bandstructure(BZ,hop_amp,TH)
     N = Int(sqrt(size(TH)[1]))
 
@@ -754,6 +854,91 @@ function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
     display(kGtoK)
 
     for i in 1:3
+        axes.plot(kGtoK,bands_GtoK[i],color="black")
+    end
+    axes.plot(kGtoK,E_matter_band_min,color="b")
+    axes.plot(kGtoK,E_matter_band,color="r")
+end 
+
+
+# This section adds functions to calulate and plot band structures using the effective Hamiltonian 
+
+function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
+    """
+    This plots the bands along the direction between Gamma and K points in the Brillouin Zone
+    This requires:
+    - the bandstructure as a dictionary bandstructure[k] whose entries are the energies for that k vector
+    - the Brillouin zone BZ as a matrix of k vectors 
+    """
+    num_bands = size(bandstructure[[0,0]])[1]
+
+    GtoK = []
+    bands_GtoK = [[] for i = 1:num_bands]
+    E_matter_band_min = []
+
+    E_matter_band = []
+
+    for k in BZ 
+        E_matter_min = 12 
+        if (k[2]+k[1]==1) 
+            push!(GtoK,k)
+            for i in 1:num_bands
+                if i%4 == 0 
+                    if bandstructure[k][i] < E_matter_min
+                        E_matter_min = bandstructure[k][i]
+                    end 
+                end 
+                push!(bands_GtoK[i],bandstructure[k][i])
+            end
+            push!(E_matter_band_min,E_matter_min)
+            push!(E_matter_band,get_exact_GS_matter_fermion_energy(k[1]*g1+k[2]*g2))
+        end 
+    end 
+    kGtoK = collect((1:length(GtoK))*(g1[1]-g2[1])/(2*length(GtoK)))
+    display(kGtoK)
+
+    for i in 1:10000
+        axes.plot(kGtoK,bands_GtoK[i],color="black")
+    end
+    axes.plot(kGtoK,E_matter_band_min,color="b")
+    axes.plot(kGtoK,E_matter_band,color="r")
+end 
+
+function plot_bands_G_to_M(BZ,bandstructure,axes=gca())
+    """
+    This plots the bands along the direction between Gamma and K points in the Brillouin Zone
+    This requires:
+    - the bandstructure as a dictionary bandstructure[k] whose entries are the energies for that k vector
+    - the Brillouin zone BZ as a matrix of k vectors 
+    """
+    num_bands = size(bandstructure[[0,0]])[1]
+
+    GtoK = []
+    bands_GtoK = [[] for i = 1:num_bands]
+    E_matter_band_min = []
+
+    E_matter_band = []
+
+    for k in BZ 
+        E_matter_min = 12 
+        if (k[1]==k[2]) 
+            push!(GtoK,k)
+            for i in 1:num_bands
+                if i%4 == 0 
+                    if bandstructure[k][i] < E_matter_min
+                        E_matter_min = bandstructure[k][i]
+                    end 
+                end 
+                push!(bands_GtoK[i],bandstructure[k][i])
+            end
+            push!(E_matter_band_min,E_matter_min)
+            push!(E_matter_band,get_exact_GS_matter_fermion_energy(k[1]*g1+k[2]*g2))
+        end 
+    end 
+    kGtoK = collect((1:length(GtoK))*(g1[1]-g2[1])/(2*length(GtoK)))
+    display(kGtoK)
+
+    for i in 1:10000
         axes.plot(kGtoK,bands_GtoK[i],color="black")
     end
     axes.plot(kGtoK,E_matter_band_min,color="b")
