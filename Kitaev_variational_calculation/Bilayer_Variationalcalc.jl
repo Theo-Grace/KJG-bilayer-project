@@ -64,6 +64,8 @@ function my_brillouinzone(N)
     return BZ
 end 
 
+# This section adds functions to treat a hexagonal lattice 
+
 function get_hex_lattice(N)
     hex_lattice = []
     for j  = 0:N
@@ -167,13 +169,16 @@ function plot_my_lattice(N)
 end 
 
 function plot_my_BZ(N)
-    BZ = my_brillouinzone(N)
+    my_BZ = my_brillouinzone(N)
 
-    for k_vec in BZ
+    BZ = zeros(2,N^2)
+
+    for (id,k_vec) in enumerate(my_BZ)
         k = k_vec[1]*g1+k_vec[2]*g2
 
-        scatter(k[1],k[2],color="b")
+        BZ[:,id] = k
     end 
+    scatter(BZ[1,:],BZ[2,:],color="b")
     scatter(g1[1],g1[2])
     scatter(g2[1],g2[2])
 end
@@ -290,7 +295,7 @@ function convert_lattice_vector_to_index(lattice_vector,N)
     Given a lattice vector in the form [n1,n2] this assigns an integer according to a specific numbering convention
     """
     index = 1 + lattice_vector[1] + N*lattice_vector[2]
-    return Int(index)
+    return Int(round(index))
 end 
 
 function convert_index_to_lattice_vector(index,N)
@@ -301,6 +306,16 @@ function convert_index_to_lattice_vector(index,N)
         n2 = Int(floor(index/N))
         n1 = Int(index - n2*N -1)
     end 
+
+    return [n1,n2]
+end 
+
+function convert_k_to_k_vec(k)
+    """
+    This function converts a vector in reciprocal space to a "k_vec" which means a vector written in index form k_vec = [n1,n2] ( = n1*g1 + n2*g2)
+    """
+    n1 = (dot(g1,g2)*dot(k,g2) - dot(g2,g2)*dot(k,g1))/(dot(g2,g1)^2 - dot(g1,g1)*dot(g2,g2))
+    n2 = (dot(g1,g2)*dot(k,g1) - dot(g1,g1)*dot(k,g2))/(dot(g2,g1)^2 - dot(g1,g1)*dot(g2,g2))
 
     return [n1,n2]
 end 
@@ -475,6 +490,9 @@ function calculate_number_density_at_site(site,T_u,ex_id)
 end 
 
 function plot_eigenstate_fermion_density(T,ex_id,size_scale=10,colour="b")
+    """
+    Plots the number density of matter fermions on the real space lattice
+    """
     N = Int(sqrt(size(T)[1]/2))
     lattice = zeros(2,N^2)
     num_density_vector = zeros(1,N^2)
@@ -495,11 +513,11 @@ function plot_eigenstate_fermion_density(T,ex_id,size_scale=10,colour="b")
     scatter(lattice[1,:],lattice[2,:],sizes = size_scale*num_density_vector[1,:],color=colour)
     scatter(lattice[1,:].+N*a1[1],lattice[2,:].+N*a1[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
     scatter(lattice[1,:].+N*a2[1],lattice[2,:].+N*a2[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
-    scatter(lattice[1,:].+N*(a1[1]+a2[1]),lattice[2,:].+N*(a1[2]+a2[2]),sizes = size_scale*num_density_vector[1,:],color=colour)
+    scatter(lattice[1,:].-N*(a1[1]+a2[1]),lattice[2,:].-N*(a1[2]+a2[2]),sizes = size_scale*num_density_vector[1,:],color=colour)
     scatter(lattice[1,:].-N*a2[1],lattice[2,:].-N*a2[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
     scatter(lattice[1,:].-N*a1[1],lattice[2,:].-N*a1[2],sizes = size_scale*num_density_vector[1,:],color=colour,alpha=0.5)
 
-    xlim(0,2*N*a1[1])
+    xlim(-N*a1[1],N*a1[1])
     ylim(-N*a1[2],N*a1[2])
 
     if ex_id%10 == 1 
@@ -639,6 +657,14 @@ end
 # This section adds functions to calculate matrix elements using exact eigenstates 
 
 function flux_spin_plane_wave_matrix_element(N,K)
+    """
+    calculates matrix elements of the form <r g| S |k> 
+    - The flux pair is taken to always be at the origin 
+    - The matrix element is calculated for every plane wave matter fermion in the BZ
+    returns:
+    - An N^2 x 3 matrix of matrix elements for A sites. The second dimension specifies the orientation of the flux pair. 
+    - An N^2 x 3 matrix of matrix elements for B sites. 
+    """
     H0 = get_H0(N,K)
 
     T0 = get_T0_exactly(H0)
@@ -648,9 +674,11 @@ function flux_spin_plane_wave_matrix_element(N,K)
     A_matrix_elements = zeros(Complex{Float64},N^2,3)
     B_matrix_elements = zeros(Complex{Float64},N^2,3)
 
+    flux_site = [0,0]
+
     for (j,flavour) in enumerate(["x","y","z"])
 
-        HF = flip_bond_variable(H0,[1,1],flavour)
+        HF = flip_bond_variable(H0,flux_site,flavour)
         _,TF = diagonalise(HF)
 
         T = TF*T0'
@@ -665,12 +693,30 @@ function flux_spin_plane_wave_matrix_element(N,K)
         X,Y = get_X_and_Y(T)
         M = inv(X)*Y
         C = (det(X'*X))^(1/4)
+
+        C_A_index = convert_lattice_vector_to_index(flux_site,N)
+
+        if flavour == "z"
+            C_B_index = C_A_index
+        elseif flavour == "y"
+            if flux_site[2] == 0
+                C_B_index = N*(N-1) + C_A_index
+            else
+                C_B_index = C_A_index - N 
+            end 
+        else
+            if flux_site[1] == 0 
+                C_B_index = C_A_index + N -1
+            else 
+                C_B_index = C_A_index -1 
+            end 
+        end 
         
         for k_vec in BZ
             k_id = convert_lattice_vector_to_index(Int.(round.(N*k_vec)),N)
 
-            A_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cA","f'"],[1,k_id],op_dict,M,C)
-            B_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cB","f'"],[1,k_id],op_dict,M,C)
+            A_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cA","f'"],[C_A_index,k_id],op_dict,M,C)
+            B_matrix_elements[k_id,j] = im*two_fermion_matrix_element(["cB","f'"],[C_B_index,k_id],op_dict,M,C)
         end 
     end 
 
@@ -678,6 +724,11 @@ function flux_spin_plane_wave_matrix_element(N,K)
 end 
 
 function calculate_hybridisation_amplitudes_TH(N,K)
+    """
+    Calculates the hybridisation amplitude as a function of two coordinates in the Brillouin zone 
+    returns: 
+    - An N^2 x N^2 x 3 matrix of hybridisation amplitudes. The 3rd dimension specifies the orientation of the flux pair. The wave vectors are labelled using their numerical id 
+    """
     A_ME, B_ME = flux_spin_plane_wave_matrix_element(N,K)
 
     BZ = my_brillouinzone(N)
@@ -698,6 +749,106 @@ function calculate_hybridisation_amplitudes_TH(N,K)
     end 
 
     return T_H
+end 
+
+function transform_hybridisation_amplitudes_to_Q_delta_k_coordinates(TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    TH_Q_dk = zeros(Complex{Float64},N^2,N^2,3)
+
+    BZ = my_brillouinzone(N)
+
+    included_Q_vectors = zeros(N^2,2)
+
+    for k in BZ
+        for q in BZ
+            k_id = convert_lattice_vector_to_index(Int.(round.(N*k)),N)
+            q_id = convert_lattice_vector_to_index(Int.(round.(N*q)),N)
+
+            Q = shift_k_to_BZ((k+q))
+            dk = shift_k_to_BZ((k-q))
+
+            Q_id = convert_lattice_vector_to_index(Int.(round.(N*Q)),N)
+            dk_id = convert_lattice_vector_to_index(Int.(round.(N*dk)),N)
+
+            TH_Q_dk[Q_id,dk_id,:] = TH[k_id,q_id,:]
+
+            scatter(Q[1],Q[2])
+            sleep(0.01)
+        end 
+    end 
+
+    return TH_Q_dk
+end 
+
+function plot_hybridisation_amplitude_at_fixed_Q(Q,TH_Q_dk)
+    N = Int(sqrt(size(TH_Q_dk)[1]))
+
+    Q_id = convert_lattice_vector_to_index(Int.(round.(N*Q)),N)
+
+    dk_vector_list = zeros(2,N^2)
+
+    for dk_id = 1:N^2 
+        dk = convert_index_to_lattice_vector(dk_id,N)./N
+        dk_vector_list[:,dk_id] = g1*dk[1] + g2*dk[2]
+    end 
+
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_Q_dk[Q_id,:,1]),color="b")
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_Q_dk[Q_id,:,2]),color="r")
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_Q_dk[Q_id,:,3]),color="g")
+    #scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],real.(TH_Q_dk[Q_id,:,1]),color="r")
+end 
+
+function plot_hybridisation_amplitude_at_Gamma_point(TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    dk_vector_list = zeros(2,N^2)
+    TH_at_Gamma = zeros(Complex{Float64},N^2,3)
+
+    for dk_id = 1:N^2 
+        dk = convert_index_to_lattice_vector(dk_id,N)./N
+        neg_dk = shift_k_to_BZ(-dk)
+        neg_dk_id = convert_lattice_vector_to_index(round.(neg_dk.*N),N)
+        dk_vector_list[:,dk_id] = g1*dk[1] + g2*dk[2]
+        TH_at_Gamma[dk_id,:] = TH[dk_id,neg_dk_id,:]
+    end 
+
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_at_Gamma[:,1]),color="b")
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_at_Gamma[:,2]),color="r")
+    scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_at_Gamma[:,3]),color="g")
+
+    #scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],real.(TH_Q_dk[Q_id,:,1]),color="r")
+
+    #scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),s=abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),color="g")
+    #scatter3D(dk_vector_list[1,:].+g1[1],dk_vector_list[2,:].+g1[2],abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),s=abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),color="g")
+    #scatter3D(dk_vector_list[1,:].+g2[1],dk_vector_list[2,:].+g2[2],abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),s=abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),color="g")
+    #scatter3D(dk_vector_list[1,:].+g1[1].+g2[1],dk_vector_list[2,:].+g1[2].+g2[2],abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),s=abs.(TH_at_Gamma[:,1]+TH_at_Gamma[:,2]+TH_at_Gamma[:,3]),color="g")
+end 
+
+function plot_hybridisation_amplitude_at_fixed_k(k,TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    k_id = convert_lattice_vector_to_index(Int.(round.(N*k)),N)
+
+    q_vector_list = zeros(2,N^2)
+
+    for q_id = 1:N^2 
+        q = convert_index_to_lattice_vector(q_id,N)./N
+        q_vector_list[:,q_id] = g1*q[1] + g2*q[2]
+    end 
+
+    scatter3D(q_vector_list[1,:],q_vector_list[2,:],abs.(TH[k_id,:,1]),color="b")
+    scatter3D(q_vector_list[1,:],q_vector_list[2,:],abs.(TH[k_id,:,2]),color="r")
+    scatter3D(q_vector_list[1,:],q_vector_list[2,:],abs.(TH[k_id,:,3]),color="g")
+    #scatter3D(dk_vector_list[1,:],dk_vector_list[2,:],real.(TH_Q_dk[Q_id,:,1]),color="r")
+
+    scatter3D(q_vector_list[1,:].+g1[1],q_vector_list[2,:].+g1[2],abs.(TH[k_id,:,1]),color="b")
+    scatter3D(q_vector_list[1,:].+g1[1],q_vector_list[2,:].+g1[2],abs.(TH[k_id,:,2]),color="r")
+    scatter3D(q_vector_list[1,:].+g1[1],q_vector_list[2,:].+g1[2],abs.(TH[k_id,:,3]),color="g")
+
+    scatter3D(q_vector_list[1,:].+g2[1],q_vector_list[2,:].+g2[2],abs.(TH[k_id,:,1]),color="b")
+    scatter3D(q_vector_list[1,:].+g2[1],q_vector_list[2,:].+g2[2],abs.(TH[k_id,:,2]),color="r")
+    scatter3D(q_vector_list[1,:].+g2[1],q_vector_list[2,:].+g2[2],abs.(TH[k_id,:,3]),color="g")
 end 
 
 function get_bandstructure(BZ,hop_amp,TH)
@@ -760,17 +911,20 @@ function plot_bands_G_to_K(BZ,bandstructure,axes=gca())
     axes.plot(kGtoK,E_matter_band,color="r")
 end 
 
-function shift_k_to_BZ(k_vec,N)
+function shift_k_to_BZ(k_vec)
+    """
+    given a k_vector in the form [n1, n2] this function will shift the vector by a reciprocal lattice vector to the equivalent point in the first BZ 
+    """
     shifted_k_vec = zeros(1,2)
     if k_vec[1] < 0
-        shifted_k_vec[1] = ceil(k_vec[1]+1)%1
+        shifted_k_vec[1] = (k_vec[1]+1)%1 # removed ceil() here!
     else 
-        shifted_k_vec[1] = ceil(k_vec[1])%1
+        shifted_k_vec[1] = (k_vec[1])%1
     end 
     if k_vec[2] < 0
-        shifted_k_vec[2] = ceil(k_vec[2]+1)%1
+        shifted_k_vec[2] = (k_vec[2]+1)%1
     else
-        shifted_k_vec[2] = ceil(k_vec[2])%1
+        shifted_k_vec[2] = (k_vec[2])%1
     end 
 
     return shifted_k_vec
@@ -860,3 +1014,210 @@ function plot_bands_G_to_K_to_M_to_G(BZ,bandstructure,axes=gca())
     axes.set_ylabel("Energy")
     axes.vlines([kGtoKtoMtoG[1],kGtoKtoMtoG[K_index],kGtoKtoMtoG[M_index],kGtoKtoMtoG[length(kGtoKtoMtoG)]],(1.1*E_min),1.1*E_max,linestyle="dashed")
 end
+
+function find_degenerate_k_vectors(Q,N)
+    my_BZ = my_brillouinzone(N)
+    Delta = 0.26
+    degenerate_k_list = []
+
+    for k_vec in my_BZ
+        k = k_vec[1].*g1+k_vec[2].*g2
+
+        E = get_exact_GS_matter_fermion_energy(k)+get_exact_GS_matter_fermion_energy(Q-k)
+
+        if abs(E-2*Delta) < 0.5*Delta
+            push!(degenerate_k_list,k)
+        end 
+    end 
+
+    degenerate_k = zeros(length(degenerate_k_list),2)
+
+    for (id,k) in enumerate(degenerate_k_list)
+        degenerate_k[id,:] = k 
+    end 
+
+    #plot_my_BZ(N)
+    #scatter(degenerate_k[:,1],degenerate_k[:,2])
+
+    return degenerate_k_list
+end 
+    
+function Hamiltonian_for_Gamma_point_degenerate_subspace(hopping,TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    Delta = 0.26
+
+    degenerate_k = find_degenerate_k_vectors([0 0],N)
+
+    degenerate_Hamiltonian = zeros(Complex{Float64},3+length(degenerate_k),3+length(degenerate_k))
+
+    for i = 1:3
+        for j = (i+1):3
+            degenerate_Hamiltonian[i,j] = hopping
+        end 
+        degenerate_Hamiltonian[i,i] = Delta 
+    end 
+    
+    for (id,k) in enumerate(degenerate_k)
+        k_vec = convert_k_to_k_vec(k)
+        k_id = convert_lattice_vector_to_index(N.*k_vec,N)
+
+
+        neg_k_vec = shift_k_to_BZ(-k_vec)
+        neg_k_id = convert_lattice_vector_to_index(round.(neg_k_vec.*N),N)
+
+        for flavour = 1:3
+            degenerate_Hamiltonian[flavour,3+id] = TH[k_id,neg_k_id,flavour]
+        end 
+
+        degenerate_Hamiltonian[3+id,3+id] = get_exact_GS_matter_fermion_energy(k)+get_exact_GS_matter_fermion_energy(-k)
+    end 
+
+    degenerate_Hamiltonian = Hermitian(degenerate_Hamiltonian)
+
+    return degenerate_Hamiltonian
+
+end 
+
+function Hamiltonian_for_degenerate_subspace_at_fixed_Q(hopping,TH,Q)
+    N = Int(sqrt(size(TH)[1]))
+
+    Delta = 0.26
+
+    degenerate_k = find_degenerate_k_vectors(Q,N)
+
+    degenerate_Hamiltonian = zeros(Complex{Float64},3+length(degenerate_k),3+length(degenerate_k))
+
+    for i = 1:3
+        for j = (i+1):3
+            degenerate_Hamiltonian[i,j] = hopping
+        end 
+        degenerate_Hamiltonian[i,i] = 2*Delta 
+    end 
+    
+    for (id,k) in enumerate(degenerate_k)
+        k_vec = convert_k_to_k_vec(k)
+        k_id = convert_lattice_vector_to_index(N.*k_vec,N)
+
+        Q_vec = convert_k_to_k_vec(Q)
+        k_prime_vec = shift_k_to_BZ(Q_vec-k_vec)
+        k_prime_id = convert_lattice_vector_to_index(round.(k_prime_vec.*N),N)
+
+        for flavour = 1:3
+            degenerate_Hamiltonian[flavour,3+id] = -TH[k_id,k_prime_id,flavour]
+        end 
+
+        degenerate_Hamiltonian[3+id,3+id] = get_exact_GS_matter_fermion_energy(k)+get_exact_GS_matter_fermion_energy(Q-k)
+    end 
+
+    degenerate_Hamiltonian = Hermitian(degenerate_Hamiltonian)
+
+    return degenerate_Hamiltonian
+
+end 
+
+function plot_energy_level_at_Gamma_point_vs_J_perp(TH)
+    N = Int(sqrt(size(TH)[1]))
+
+    hopping_amp = 0.56
+
+    J_perp_list = collect(0:100)*0.1
+
+    degenerate_k = find_degenerate_k_vectors([0 0],N)
+
+    Energy_list = zeros(length(J_perp_list),3+length(degenerate_k))
+
+    for (id,J_perp) in enumerate(J_perp_list)
+        degenerate_Hamiltonian = Hamiltonian_for_Gamma_point_degenerate_subspace(J_perp*hopping_amp,J_perp*TH)
+
+        Energy_list[id,:] = eigvals(degenerate_Hamiltonian)
+    end 
+
+    for state_num = 1:(3+length(degenerate_k))
+        plot(J_perp_list,Energy_list[:,state_num],color="r")
+    end 
+end 
+
+function plot_flux_pair_band(hopping,TH,J_perp,axes=gca())
+    N = Int(sqrt(size(TH)[1]))
+
+    my_BZ = my_brillouinzone(N)
+
+    num_bands = 3
+    GtoKtoMtoG = []
+    GtoM = []
+    bands_GtoKtoMtoG = [[] for i = 1:num_bands]
+    bands_GtoM = [[] for i = 1:num_bands]
+
+    all_bands_GtoKtoMtoG = []
+    all_bands_GtoM = []
+
+    K_index=0
+    for Q_vec in my_BZ 
+        Q = Q_vec[1]*g1 + Q_vec[2]*g2
+        if (Q_vec[2] + Q_vec[1]== 1) && Q_vec[1] >=0.5
+            push!(GtoKtoMtoG,Q_vec)
+
+            degenerate_Hamiltonian = Hamiltonian_for_degenerate_subspace_at_fixed_Q(J_perp*hopping,J_perp*TH,Q)
+            for i in 1:num_bands
+                push!(bands_GtoKtoMtoG[i],eigvals(degenerate_Hamiltonian)[i])
+            end
+            append!(all_bands_GtoKtoMtoG,[eigvals(degenerate_Hamiltonian)])
+
+            if Q_vec[1] < 2/3 && K_index ==0
+                K_index = length(GtoKtoMtoG)
+            end
+
+        elseif (Q_vec[1]==0) && Q_vec[2] <0.5
+            push!(GtoM,Q_vec)
+
+            degenerate_Hamiltonian = Hamiltonian_for_degenerate_subspace_at_fixed_Q(J_perp*hopping,J_perp*TH,Q)
+
+            for i in 1:num_bands
+                push!(bands_GtoM[i],eigvals(degenerate_Hamiltonian)[i]) 
+            end
+
+            append!(all_bands_GtoM,[eigvals(degenerate_Hamiltonian)])
+        end
+    end 
+
+    kGtoKtoMtoG = collect((1:length(GtoKtoMtoG))*(g1[1]-g2[1])/(2*length(GtoKtoMtoG)))
+    kGtoM = collect((1:length(GtoM))*(g1[2]+g2[2])/(2*length(GtoM))) .+ ones(length(GtoM),1)*kGtoKtoMtoG[end]
+
+    M_index = length(GtoKtoMtoG)
+
+    append!(kGtoKtoMtoG,(kGtoM))
+    for i =1:num_bands
+        append!(bands_GtoKtoMtoG[i],reverse(bands_GtoM[i]))
+    end 
+    append!(all_bands_GtoKtoMtoG,reverse(all_bands_GtoM))
+
+    display(all_bands_GtoKtoMtoG)
+
+    E_min= 0
+    for i in 1:num_bands
+        if E_min > minimum(bands_GtoKtoMtoG[i]) 
+           E_min = minimum(bands_GtoKtoMtoG[i])
+        end
+        axes.plot(kGtoKtoMtoG,bands_GtoKtoMtoG[i],color="black")
+    end
+
+    E_max =1 
+
+
+    axes.set_xticks([kGtoKtoMtoG[1],kGtoKtoMtoG[K_index],kGtoKtoMtoG[M_index],kGtoKtoMtoG[length(kGtoKtoMtoG)]])
+    axes.set_xticklabels(["\$\\Gamma\$","K","M","\$\\Gamma\$"])
+    axes.set_ylabel("Energy")
+    axes.vlines([kGtoKtoMtoG[1],kGtoKtoMtoG[K_index],kGtoKtoMtoG[M_index],kGtoKtoMtoG[length(kGtoKtoMtoG)]],(1.1*E_min),1.1*E_max,linestyle="dashed")
+
+    for (id,k) in enumerate(kGtoKtoMtoG)
+        display(all_bands_GtoKtoMtoG[id])
+        scatter([k for i =1:length(all_bands_GtoKtoMtoG[id])],all_bands_GtoKtoMtoG[id],color="g")
+        sleep(0.01)
+    end 
+end
+
+
+# This section adds functions to treat isolated flux pairs on a single layer, which form immobile excitations
+
+
