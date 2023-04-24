@@ -535,6 +535,7 @@ end
 
 
 # This adds functions to find the effective Hamiltonian 
+#=
 function get_Kagome_Hamiltonian(k,hop_amp)
 
     phi_z = exp(im*dot(k,nn[1]-nn[2]))
@@ -572,6 +573,7 @@ function get_full_isolated_flux_effective_Hamiltonian(Q_vec,delta_k_vec,hopping_
 
     return Hermitian(H_eff)
 end 
+=#
 
 # This section contains functions to calculate exact eigenstates of the fluxless Kitaev Hamiltonian 
 function phase_factor(k,K)
@@ -1219,5 +1221,156 @@ end
 
 
 # This section adds functions to treat isolated flux pairs on a single layer, which form immobile excitations
+function calculate_flavour_change_matix_elements(N,K)
+    initial_flavour = "z"
+
+    A_ME = zeros(Complex{Float64},4)
+    B_ME = zeros(Complex{Float64},4)
+
+    initial_flux_site = [0,0]
+
+    H0 = get_H0(N,K)
+    HF_init = flip_bond_variable(H0,initial_flux_site,initial_flavour)
+
+    final_flux_flavour = "x"
+    final_flux_site = initial_flux_site + [1,0]
+
+    HF_final = flip_bond_variable(H0,final_flux_site,final_flux_flavour)
+
+    _,TF_init = diagonalise(HF_init)
+    _,TF_final = diagonalise(HF_final)
+
+    T = TF_final*TF_init'
+
+    X,Y = get_X_and_Y(T)
+
+    M = inv(X)*Y 
+    C = (det(X'*X))^(1/4)
+
+    op_dict = form_operator_dictionary(T,TF_init)
+
+    C_A_index = convert_lattice_vector_to_index(initial_flux_site+[0,1],N)
+    C_B_index = convert_lattice_vector_to_index(initial_flux_site,N)
+    
+    A_ME = -im*two_fermion_matrix_element(["cA","cB"],[C_A_index,C_B_index],op_dict,M,C)
+    B_ME = im*C
+
+    display(A_ME)
+    display(B_ME)
+
+    final_flux_flavour = "y"
+    final_flux_site = initial_flux_site + [0,1]
+
+    HF_final = flip_bond_variable(H0,final_flux_site,final_flux_flavour)
+
+    _,TF_init = diagonalise(HF_init)
+    _,TF_final = diagonalise(HF_final)
+
+    T = TF_final*TF_init'
+
+    X,Y = get_X_and_Y(T)
+
+    M = inv(X)*Y 
+    C = (det(X'*X))^(1/4)
+
+    op_dict = form_operator_dictionary(T,TF_init)
+
+    C_A_index = convert_lattice_vector_to_index(initial_flux_site+[1,0],N)
+    C_B_index = convert_lattice_vector_to_index(initial_flux_site,N)
+    
+    A_ME = -im*two_fermion_matrix_element(["cA","cB"],[C_A_index,C_B_index],op_dict,M,C)
+    B_ME = im*C
+
+    display(A_ME)
+    display(B_ME)
+end 
+
+        
 
 
+function calculate_flavour_exchange_amplitude(N,K)
+    H0 = get_H0(N,K)
+    flux_site = [0,0]
+
+    initial_flux_flavour = "z"
+    final_flux_flavour = "x"
+
+    HF_init = flip_bond_variable(H0,flux_site,initial_flux_flavour)
+    HF_final = flip_bond_variable(H0,flux_site,final_flux_flavour)
+
+    E_init, T_init = diagonalise(HF_init)
+    E_final, T_final = diagonalise(HF_final)
+
+    T = T_final*T_init' 
+
+    op_dict = form_operator_dictionary(T,T_init)
+
+    X,Y = get_X_and_Y(T)
+
+    C = (det(X'*X))^(1/4)
+    M = inv(X)*Y
+
+    C_A_index = convert_lattice_vector_to_index(flux_site,N)
+    flavour = setdiff(["x","y","z"],[initial_flux_flavour,final_flux_flavour])[1]
+
+    if flavour == "z"
+        C_B_index = C_A_index
+    elseif flavour == "y"
+        if flux_site[2] == 0
+            C_B_index = N*(N-1) + C_A_index
+        else
+            C_B_index = C_A_index - N 
+        end 
+    else
+        if flux_site[1] == 0 
+            C_B_index = C_A_index + N -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    display(convert_index_to_lattice_vector(C_B_index,N))
+
+    A_site_hopping_amp = im*C
+    B_site_hopping_amp = -im*two_fermion_matrix_element(["cA","cB"],[C_A_index,C_B_index],op_dict,M,C)
+
+    display(A_site_hopping_amp)
+    display(B_site_hopping_amp)
+
+    flavour_exchange_amp = abs(A_site_hopping_amp)^2 + abs(B_site_hopping_amp)^2
+
+    return flavour_exchange_amp
+end # Flavour exhange amplitude is ~ 0.9 
+
+function plot_flavour_exchange_amp_vs_N(N_max,K)
+    for N = 4:N_max
+        flavour_exchange_amp = calculate_flavour_exchange_amplitude(N,K)
+
+        scatter(N,flavour_exchange_amp)
+        sleep(0.01)
+    end 
+end 
+
+function calculate_flux_matter_joint_tunneling_amplitude(N,K)
+    A_ME, B_ME = flux_spin_plane_wave_matrix_element(N, K)
+
+    joint_tunneling_amplitude = zeros(Complex{Float64},N^2,N^2,3)
+    
+    for k_id = 1:N^2 
+        for k_prime_id = 1:N^2
+            joint_tunneling_amplitude[k_id,k_prime_id,:] = A_ME[k_id,:].*conj.(A_ME[k_prime_id,:])+ B_ME[k_id,:].*conj.(B_ME[k_prime_id,:])
+        end 
+    end 
+
+    return joint_tunneling_amplitude
+end 
+
+function calculate_on_site_hopping_amplitude(N,K,initial_flavour,final_flavour)
+    H0 = get_H0(N,K)
+    HF_init = flip_bond_variable(H0,flux_site,initial_flavour)
+    HF_final = flip_bond_variable(H0,flux_site,final_flavour)
+
+    _,TF_init = diagonalise(HF_init)
+    _,TF_final = diagonalise(HF_final)
+
+end 
