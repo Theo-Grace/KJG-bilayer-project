@@ -92,18 +92,14 @@ function save_ReG0AA_data(w_points,ReG0AA,tol)
     The tolerance for numerical integration was tol=$tol.
     The Integration was perfomed using quadgk"
 
-    group_name = "ReG0AA_data"
+    group_name = "ReG0AA_data_2"
 
-    fid = h5open(homedir()*"\\Documents\\Physics\\Kitaev model project\\G0AA","cw")
-    it_num = 2
-    while group_name in keys(fid)
-        global group_name = group_name*"_$it_num"
-    end
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA\\ReG0AA_data","cw")
 
     create_group(fid,group_name)
     g = fid[group_name]
     write(g,"Description",Description)
-    write(g,"w_points",w_pointst)
+    write(g,"w_points",w_points)
     write(g,"Real part of G0AA",ReG0AA)
     close(fid)
 end
