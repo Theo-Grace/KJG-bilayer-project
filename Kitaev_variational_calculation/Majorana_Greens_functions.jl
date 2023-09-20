@@ -103,8 +103,21 @@ function save_ReG0AA_data(w_points,ReG0AA,tol)
     create_group(fid,group_name)
     g = fid[group_name]
     write(g,"Description",Description)
-    write(g,"w_points",w_pointst)
+    write(g,"w_points",w_points)
     write(g,"Real part of G0AA",ReG0AA)
     close(fid)
 end
 # Note that ReG0AA ~< 0.1 for |w|>15 
+
+function load_ReG0AA()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA\\ReG0AA_data","r")
+    group_name = "ReG0AA_data_2"
+    g = fid[group_name]
+    show(stdout,"text/plain",keys(fid))
+    show(stdout,"text/plain",keys(g))
+    w_points = read(g["w_points"])
+    ReG0AA = read(g["Real part of G0AA"])
+    close(fid)
+
+    return w_points, ReG0AA
+end
