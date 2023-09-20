@@ -104,3 +104,65 @@ function save_ReG0AA_data(w_points,ReG0AA,tol)
     close(fid)
 end
 # Note that ReG0AA ~< 0.1 for |w|>15 
+
+function load_ReG0AA()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA\\ReG0AA_data","r")
+    group_name = "ReG0AA_data_2"
+    g = fid[group_name]
+    show(stdout,"text/plain",keys(fid))
+    show(stdout,"text/plain",keys(g))
+    w_points = read(g["w_points"])
+    ReG0AA = read(g["Real part of G0AA"])
+    close(fid)
+
+    return w_points, ReG0AA
+end
+
+# This section adds functions to calculate G0AB
+
+function ReG0AB_at_w(w,tol=1e-7)
+    AA_Integrand(t) = (1/pi)*((w^2+4)/4 - 4/(1+t^2))*(((w^2+4)/8)*(1+t^2) - ((1+t^2)^2)*(((w^2-4)/16)^2) -1)^(-1/2)
+    eta = 10^(-10)
+    if 2<w<6
+        ReG0AB,est = quadgk(AA_Integrand,0,tan(acos((w-2)/4))-eta,rtol=tol)
+    elseif 0<w<2
+        ReG0AB,est = quadgk(AA_Integrand,tan(acos((2+w)/4))+eta,tan(acos((2-w)/4))-eta,rtol=tol)
+    end
+    return ReG0AB
+end 
+
+function get_ReG0AB(Num_points=10)
+    ReG0AB = zeros(2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,5.9999,Num_points))
+        display(id)
+        ReG0AB[Num_points+id] = ReG0AB_at_w(w)
+        ReG0AB[Num_points+1-id] = ReG0AB_at_w(w)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,5.99,Num_points)));collect(LinRange(0.01,5.99,Num_points))]
+    return w_points, ReG0AB
+end 
+
+function Interpolate_ReG0AB(w)
+    b=findfirst((x -> x>w),ReG0AB_w_points)
+    a=b-1
+    Interpolated_ReG0AB = ReG0AB[a]+(w-ReG0AB_w_points[a])*(ReG0AB[b]-ReG0AB[a])/(ReG0AB_w_points[b]-ReG0AB_w_points[a])
+    return Interpolated_ReG0AB
+end 
+
+function ImG0AB_at_w(w,tol=1e-7)
+    eta = 1e-6
+    Integrand(w_prime) = (1/pi)*Interpolate_ReG0AB(w_prime)*((w_prime-w)/((w_prime-w)^2+eta^2))
+    ImG0AB_,est = quadgk(Integrand,-5.99,5.99,rtol=tol)
+    return ImG0AB_
+end
+
+function get_ImG0AB(Num_points=1000)
+    ImG0AB_ = zeros(2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,100,Num_points))
+        ImG0AB_[Num_points+id] = ImG0AB_at_w(w)
+        ImG0AB_[Num_points+1-id] = ImG0AB_at_w(w)
+        display(id)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,100,Num_points)));collect(LinRange(0.01,100,Num_points))]
+    return w_points, ImG0AB_
+end 
