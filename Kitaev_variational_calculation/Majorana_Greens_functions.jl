@@ -61,9 +61,13 @@ function get_ImG0AA(Num_points=1000)
 end 
 
 function Interpolate_ImG0AA(w)
-    b=findfirst((x -> x>w),w_points)
-    a=b-1
-    Interpolated_ImG0AA = ImG0AA[a]+(w-w_points[a])*(ImG0AA[b]-ImG0AA[a])/(w_points[b]-w_points[a])
+    if abs(w) > 6
+        Interpolated_ImG0AA = 0
+    else
+        b=findfirst((x -> x>w),ImG0AA_w_points)
+        a=b-1
+        Interpolated_ImG0AA = ImG0AA[a]+(w-ImG0AA_w_points[a])*(ImG0AA[b]-ImG0AA[a])/(ImG0AA_w_points[b]-ImG0AA_w_points[a])
+    end
     return Interpolated_ImG0AA
 end 
 
@@ -85,42 +89,12 @@ function get_ReG0AA(Num_points=1000)
     return w_points, ReG0AA
 end 
 
-function save_ReG0AA_data(w_points,ReG0AA,tol)
-    Num_points = size(w_points)[1]/2
-
-    Description = "The number of points used to calculate ReG0AA was $Num_points 
-    The tolerance for numerical integration was tol=$tol.
-    The Integration was perfomed using quadgk"
-
-    group_name = "ReG0AA_data"
-
-    fid = h5open(homedir()*"\\Documents\\Physics\\Kitaev model project\\G0AA","cw")
-    it_num = 2
-    while group_name in keys(fid)
-        global group_name = group_name*"_$it_num"
-    end
-
-    create_group(fid,group_name)
-    g = fid[group_name]
-    write(g,"Description",Description)
-    write(g,"w_points",w_points)
-    write(g,"Real part of G0AA",ReG0AA)
-    close(fid)
-end
-# Note that ReG0AA ~< 0.1 for |w|>15 
-
-function load_ReG0AA()
-    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA\\ReG0AA_data","r")
-    group_name = "ReG0AA_data_2"
-    g = fid[group_name]
-    show(stdout,"text/plain",keys(fid))
-    show(stdout,"text/plain",keys(g))
-    w_points = read(g["w_points"])
-    ReG0AA = read(g["Real part of G0AA"])
-    close(fid)
-
-    return w_points, ReG0AA
-end
+function Interpolate_ReG0AA(w)
+    b=findfirst((x -> x>w),ReG0AA_w_points)
+    a=b-1
+    Interpolated_ReG0AA = ReG0AA[a]+(w-ReG0AA_w_points[a])*(ReG0AA[b]-ReG0AA[a])/(ReG0AA_w_points[b]-ReG0AA_w_points[a])
+    return Interpolated_ReG0AA
+end 
 
 # This section adds functions to calculate G0AB
 
@@ -135,7 +109,7 @@ function ReG0AB_at_w(w,tol=1e-7)
     return ReG0AB
 end 
 
-function get_ReG0AB(Num_points=10)
+function get_ReG0AB(Num_points=1000)
     ReG0AB = zeros(2*Num_points)
     for (id,w) = enumerate(LinRange(0.01,5.9999,Num_points))
         display(id)
@@ -147,9 +121,13 @@ function get_ReG0AB(Num_points=10)
 end 
 
 function Interpolate_ReG0AB(w)
-    b=findfirst((x -> x>w),ReG0AB_w_points)
-    a=b-1
-    Interpolated_ReG0AB = ReG0AB[a]+(w-ReG0AB_w_points[a])*(ReG0AB[b]-ReG0AB[a])/(ReG0AB_w_points[b]-ReG0AB_w_points[a])
+    if abs(w) > 6
+        Interpolated_ReG0AB = 0
+    else
+        b = findfirst((x -> x>w),ReG0AB_w_points)
+        a=b-1
+        Interpolated_ReG0AB = ReG0AB[a]+(w-ReG0AB_w_points[a])*(ReG0AB[b]-ReG0AB[a])/(ReG0AB_w_points[b]-ReG0AB_w_points[a])
+    end 
     return Interpolated_ReG0AB
 end 
 
@@ -169,4 +147,180 @@ function get_ImG0AB(Num_points=1000)
     end
     w_points = [-reverse(collect(LinRange(0.01,100,Num_points)));collect(LinRange(0.01,100,Num_points))]
     return w_points, ImG0AB_
+end 
+
+function Interpolate_ImG0AB(w)
+    b=findfirst((x -> x>w),ImG0AB_w_points)
+    a=b-1
+    Interpolated_ImG0AB = ImG0AB[a]+(w-ImG0AB_w_points[a])*(ImG0AB[b]-ImG0AB[a])/(ImG0AB_w_points[b]-ImG0AB_w_points[a])
+    return Interpolated_ImG0AB
+end 
+
+# This section adds functions to save and load data
+# Note that ReG0AA ~< 0.1 for |w|>15 
+function save_ImG0AA_data(w_points,ImG0AA,tol=1e-7)
+    Num_points = size(w_points)[1]/2
+
+    Description = "The number of points used to calculate ReG0AA was $Num_points 
+    The tolerance for numerical integration was tol=$tol.
+    The Integration was perfomed using quadgk"
+
+    group_name = "ImG0AA_data"
+
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA","cw")
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"Description",Description)
+    write(g,"w_points",w_points)
+    write(g,"Imaginary part of G0AA",ImG0AA)
+    close(fid)
+end
+
+function load_ImG0AA()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA","r")
+    group_name = "ImG0AA_data"
+    g = fid[group_name]
+    w_points = read(g["w_points"])
+    ImG0AA = read(g["Imaginary part of G0AA"])
+    close(fid)
+
+    return w_points, ImG0AA
+end 
+
+function save_ReG0AA_data(w_points,ReG0AA,tol=1e-7)
+    Num_points = size(w_points)[1]/2
+
+    Description = "The number of points used to calculate ReG0AA was $Num_points 
+    The tolerance for numerical integration was tol=$tol.
+    The Integration was perfomed using quadgk"
+
+    group_name = "ReG0AA_data"
+
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA","cw")
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"Description",Description)
+    write(g,"w_points",w_points)
+    write(g,"Real part of G0AA",ReG0AA)
+    close(fid)
+end
+
+function load_ReG0AA()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AA","r")
+    group_name = "ReG0AA_data"
+    g = fid[group_name]
+    w_points = read(g["w_points"])
+    ReG0AA = read(g["Real part of G0AA"])
+    close(fid)
+
+    return w_points, ReG0AA
+end 
+
+function save_ReG0AB_data(w_points,ReG0AB,tol=1e-7)
+    Num_points = size(w_points)[1]/2
+
+    Description = "The number of points used to calculate ReG0AB was $Num_points 
+    The tolerance for numerical integration was tol=$tol.
+    The Integration was perfomed using quadgk"
+
+    group_name = "ReG0AB_data"
+
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AB","cw")
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"Description",Description)
+    write(g,"w_points",w_points)
+    write(g,"Real part of G0AB",ReG0AB)
+    close(fid)
+end
+
+function load_ReG0AB()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AB","r")
+    group_name = "ReG0AB_data"
+    g = fid[group_name]
+    w_points = read(g["w_points"])
+    ReG0AB = read(g["Real part of G0AB"])
+    close(fid)
+
+    return w_points, ReG0AB
+end 
+
+function save_ImG0AB_data(w_points,ImG0AB,tol=1e-7)
+    Num_points = size(w_points)[1]/2
+
+    Description = "The number of points used to calculate ReG0AB was $Num_points 
+    The tolerance for numerical integration was tol=$tol.
+    The Integration was perfomed using quadgk"
+
+    group_name = "ImG0AB_data"
+
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AB","cw")
+
+    create_group(fid,group_name)
+    g = fid[group_name]
+    write(g,"Description",Description)
+    write(g,"w_points",w_points)
+    write(g,"Imaginary part of G0AB",ImG0AB)
+    close(fid)
+end
+
+function load_ImG0AB()
+    fid = h5open(homedir()*"\\OneDrive - The University of Manchester\\Physics work\\PhD\\Majorana Green function data\\G0AB","r")
+    group_name = "ImG0AB_data"
+    g = fid[group_name]
+    w_points = read(g["w_points"])
+    ReG0AB = read(g["Imaginary part of G0AB"])
+    close(fid)
+
+    return w_points, ImG0AB
+end 
+
+# Use this to load the saved Green's functions
+#=
+ImG0AA_w_points, ImG0AA = load_ImG0AA()
+ReG0AA_w_points, ReG0AA = load_ReG0AA()
+ImG0AB_w_points, ImG0AB = load_ImG0AB()
+ReG0AB_w_points, ReG0AB = load_ReG0AB()
+=#
+
+function G0_at_w(w)
+    G0AA = Interpolate_ReG0AA(w)+im*Interpolate_ImG0AA(w)
+    G0AB = Interpolate_ReG0AB(w)+im*Interpolate_ImG0AB(w)
+
+    G0 = [G0AA G0AB ; -G0AB G0AA]
+    return G0
+end 
+
+function get_G0(Num_points=1000)
+    G0 = zeros(Complex{Float64},2,2,2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,99,Num_points))
+        G0[:,:,Num_points+id] = G0_at_w(w)
+        G0[:,:,Num_points+1-id] = G0_at_w(-w)
+        display(w)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,99,Num_points)));collect(LinRange(0.01,99,Num_points))]
+    return w_points, G0
+end 
+
+function V_at_w(w)
+    G0AA = Interpolate_ReG0AA(w)+im*Interpolate_ImG0AA(w)
+    G0AB = Interpolate_ReG0AB(w)+im*Interpolate_ImG0AB(w)
+
+    G0 = [G0AA G0AB ; -G0AB G0AA]
+    V = 2*inv([0 -im ; im 0] - 2*G0)
+    return V
+end 
+
+function get_V(Num_points=1000)
+    V = zeros(Complex{Float64},2,2,2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,99,Num_points))
+        V[:,:,Num_points+id] = V_at_w(w)
+        V[:,:,Num_points+1-id] = V_at_w(-w)
+        display(w)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,99,Num_points)));collect(LinRange(0.01,99,Num_points))]
+    return w_points, V
 end 
