@@ -23,9 +23,9 @@ nx = (a2 - 2a1)/3
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
 # sets default boundary conditions
-L1 = 4
-L2 = 4
-m = 0 
+L1 = 50
+L2 = 45
+m = 1
 BCs = [L1,L2,m]
 
 function dual(A1,A2)
@@ -132,12 +132,59 @@ function flip_bond_variable(M,BCs,bond_site,bond_flavour)
             C_B_index = C_A_index -1 
         end 
     end 
-    M_flipped = M
+    M_flipped=zeros(L1*L2,L1*L2)
+    M_flipped[:,:] = M
     M_flipped[C_A_index,C_B_index] = -1
     #M[C_A_index,C_B_index] = 1
 
     # NOTE: There's a bug here. Using this function seems to change the input M as well as the output for some reason. 
     return M_flipped
+end 
+
+function get_M_for_single_visons(BCs)
+    """
+    Flips a chain of link variables along the boundary
+    """
+
+    L1 = BCs[1]
+    L2 = BCs[2]
+    M = BCs[3]
+
+    N = L1*L2
+    A = zeros(L1,L1)
+    B = zeros(L1,L1)
+    for j = 1:L1-1
+        A[j,j] = 1
+        A[j+1,j] = 1
+        B[j,j] = 1
+    end 
+    A[L1,L1] = 1
+    A[1,L1] = 1
+    B[L1,L1] = 1
+    B_prime = zeros(L1,L1)
+    B_prime[:,1:M] = B[:,(L1-M+1):L1]
+    B_prime[:,(M+1):L1] = B[:,1:(L1-M)]
+
+    M = zeros(N,N)
+    for j = 1:(L2-1)
+        M[(1+(j-1)*L1):(j*L1),(1+(j-1)*L1):(j*L1)] = A
+        M[(1+j*L1):((j+1)*L1),(1+(j-1)*L1):(j*L1)] = B
+    end
+    M[L1*(L2-1)+1:N,L1*(L2-1)+1:N] = A
+    M[1:L1,(L1*(L2-1)+1):N] = B_prime
+
+    final_index = Int(round(L1/2))
+    A_flipped = A
+
+    for id = 2:(final_index-1)
+        A_flipped[id,id] = -1 # This flips the z links on the chain 
+        A_flipped[id+1,id] = -1 # This flips the x links 
+    end 
+
+    M[1:L1,1:L1] = A_flipped
+
+    display(A_flipped)
+    return M 
 end 
 
 function get_X_and_Y(BCs)
@@ -163,25 +210,55 @@ function get_X_and_Y(BCs)
     return X12, Y12
 end 
 
+function get_U_and_V(M)
+    F = svd(M)
+    return F.U ,(F.Vt)'
+end 
+
+function calculate_D(BCs,U,V,Num_flipped_bonds)
+    """
+    This calculates D = prod_i D_i. This term appears in the projection operator. Any state with D eigenvalue of -1 is unphysical. 
+    D depends on: 
+    - The boundary conditions - 'Theta' term
+    - The link configuration 
+    - The determinant of the transformation between c majoranas and the fermions diagonalising H 
+    """
+    theta = BCs[1]+BCs[2] + BCs[3]*(BCs[1]-1)
+
+    exponent = theta + Num_flipped_bonds
+
+    matter_factor = Int(round(det(U)*det(V),digits=1))
+    if matter_factor == -1
+        exponent +=1
+    end 
+
+    if exponent%2 == 0 
+        D=1
+        display("matter fermion free ground state for $Num_flipped_bonds flipped links is physical")
+    else
+        D=-1
+        display("matter fermion free ground state for $Num_flipped_bonds flipped links is unphysical, must have odd number of matter fermions")
+    end
+
+    return D
+end 
+
 function get_Heisenberg_hopping(BCs)
 
     initial_flux_site = [0,0]
     M0 = get_M0(BCs)
-    F0 = svd(M0)
-    U0 = F0.U
-    V0 = F0.V 
+    U0, V0 = get_U_and_V(M0)
+    calculate_D(BCs,U0,V0,0) 
 
     M1 = flip_bond_variable(M0,BCs,initial_flux_site,"z") # M1 has z link flipped 
     M0 = get_M0(BCs)
     M2 = flip_bond_variable(M0,BCs,initial_flux_site+[1,0],"z") 
 
-    F1 = svd(M1)
-    F2 = svd(M2)
+    U1 , V1 = get_U_and_V(M1)
+    U2 , V2 = get_U_and_V(M2)
 
-    U1 = F1.U
-    U2 = F2.U
-    V1 = (F1.Vt)'
-    V2 = (F2.Vt)'
+    calculate_D(BCs,U1,V1,1)
+    calculate_D(BCs,U2,V2,1)
 
     U12 = U1'*U2
     V12 = V1'*V2
@@ -198,7 +275,6 @@ function get_Heisenberg_hopping(BCs)
     Y21 = 0.5(U21-V21)
 
     M21 = inv(X21)*Y21
-    display(M21)
 
     X1=0.5*(U1'+V1')
     Y1=0.5*(U1'-V1')
@@ -221,7 +297,7 @@ function get_Heisenberg_hopping(BCs)
     
     display(abs(det(X12))^(0.5))
     #display((U12*V12'-(U12*V12')'))
-    #display(pfaffian(V12*U12'-(V12*U12')'))
+    display(Pfaffian(V12*U12'-(V12*U12')'))
 
     U10 = U1'*U0
     V10 = V1'*V0
@@ -235,11 +311,39 @@ function get_Heisenberg_hopping(BCs)
 
     M10 = inv(X10)*Y10
     M20 = inv(X20)*Y20
-    display(det(X10)*(det(I-M20*M10)^(0.5)))
-    display(abs(det(X10))*(pfaffian([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ])))
+    #display(det(X10)*(det(I-M20*M10)^(0.5)))
+    display(abs(det(X10))*(Pfaffian([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ])))
 
-    display(pfaffian([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ]))
-    display(det([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ])^(0.5))
+    #display(pfaffian([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ]))
+    #display(det([0.5*(M20-M20') -I ; I -0.5*(M10-M10') ])^(0.5))
     
-    return M21
+    return hop
 end 
+
+function hop_single_vison(BCs,M_initial,initial_site)
+    M1 = flip_bond_variable(M_initial,BCs,initial_site,"z")
+    M_final = flip_bond_variable(M1,BCs,initial_site+[1,0],"x")
+    return M_final
+end 
+
+function plot_GS_energy_vs_vison_seperation(BCs)
+    M0 = get_M0(BCs)
+    M_initial = flip_bond_variable(M0,BCs,[0,0],"z")
+
+    E_fluxless = -sum(svd(M0).S)/(BCs[1]*BCs[2])
+
+    Energy_vs_seperation = zeros(L1)
+    Energy_vs_seperation[1] = -sum(svd(M_initial).S)
+    M = M_initial
+
+    for n1 = 1:(L1-1)
+        M = hop_single_vison(BCs,M,n1*[1,0])
+        Energy_vs_seperation[n1+1] = -sum(svd(M).S)
+    end 
+
+    Energy_vs_seperation = Energy_vs_seperation./(BCs[1]*BCs[2])
+
+    plot((1:L1)./L1,Energy_vs_seperation)
+    plot((1:L1)./L1,E_fluxless*ones(L1))
+end 
+
