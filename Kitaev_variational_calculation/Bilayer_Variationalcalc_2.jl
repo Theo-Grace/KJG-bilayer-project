@@ -23,8 +23,8 @@ nx = (a2 - 2a1)/3
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
 # sets default boundary conditions
-L1 = 50
-L2 = 45
+L1 = 6
+L2 = 5
 m = 1
 BCs = [L1,L2,m]
 
@@ -182,8 +182,6 @@ function get_M_for_single_visons(BCs)
     end 
 
     M[1:L1,1:L1] = A_flipped
-
-    display(A_flipped)
     return M 
 end 
 
@@ -347,3 +345,42 @@ function plot_GS_energy_vs_vison_seperation(BCs)
     plot((1:L1)./L1,E_fluxless*ones(L1))
 end 
 
+function plot_GS_energy_max_seperated_visons_vs_system_size(L_Max,m)
+    """
+    Uses an L by L lattice 
+    """
+    for L = 5:L_Max
+        BCs = [L,L,m]
+        M = get_M_for_single_visons(BCs)
+        M0 = get_M0(BCs)
+        M_pair = flip_bond_variable(M0,BCs,[0,0],"z")
+
+        GS_energy_per_site_w_visons = -sum(svd(M).S)/L^2
+        GS_energy_per_site_fluxless = -sum(svd(M0).S)/L^2
+        GS_energy_per_site_vison_pair = -sum(svd(M_pair).S)/L^2
+
+        scatter(1/L,GS_energy_per_site_w_visons,color="b")
+        scatter(1/L,GS_energy_per_site_fluxless,color="r")
+        scatter(1/L,GS_energy_per_site_vison_pair,color="g")
+    end 
+end 
+
+function plot_real_space_lattice(BCs)
+    lattice_sites = zeros(BCs[1]*BCs[2],2)
+
+    y_extent = 4 #  Int(round((L1*a1+L2*a2)[2]*(1/(2*sqrt(3)))))+3
+    x_extent = 4 # Int(round((L1*a1-L2*a2)[1]/2))+2
+    display(x_extent)
+
+    site_index=1
+    for n2 = 0:(BCs[2]-1)
+        for n1 = 0:(BCs[1]-1)
+            r = n1*a1+n2*a2 
+            lattice_sites[site_index,:] = r
+            site_index +=1
+        end 
+    end 
+
+    hexbin(lattice_sites[:,1],lattice_sites[:,2].-1*nz[2],gridsize=(x_extent,y_extent),edgecolors="w")
+    scatter(lattice_sites[:,1],lattice_sites[:,2])
+end 
