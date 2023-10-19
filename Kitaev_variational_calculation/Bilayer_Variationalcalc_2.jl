@@ -16,16 +16,20 @@ a1 = [1/2, sqrt(3)/2]
 a2 = [-1/2, sqrt(3)/2]
 
 # sets the nearest neighbour vectors 
-nz = (a1 + a2)/3
-ny = (a1 - 2a2)/3
-nx = (a2 - 2a1)/3
+rz = (a1 + a2)/3
+ry = (a1 - 2a2)/3
+rx = (a2 - 2a1)/3
+
+nz = [1,1]./3
+ny = [1,-2]./3
+nx = [-2,1]./3
 
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
 # sets default boundary conditions
-L1 = 6
-L2 = 5
-m = 1
+L1 = 50
+L2 = 50
+m = 0
 BCs = [L1,L2,m]
 
 function dual(A1,A2)
@@ -136,9 +140,27 @@ function flip_bond_variable(M,BCs,bond_site,bond_flavour)
     M_flipped[:,:] = M
     M_flipped[C_A_index,C_B_index] = -1
     #M[C_A_index,C_B_index] = 1
-
-    # NOTE: There's a bug here. Using this function seems to change the input M as well as the output for some reason. 
     return M_flipped
+end 
+
+function convert_n1_n2_to_site_index(n1n2vec,BCs)
+    """
+    given a lattice vector in the form [n1,n2] this function converts it to the corresponding site index, accounting for the periodic boundary conditions
+    """
+    n1 = n1n2vec[1]
+    n2 = n1n2vec[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    # First translate n1,n2 back into the cell
+    twist_num = floor(n2/L2)
+    n2_prime = (n2+100*L2)%L2 # The + 100L2 term is to try and ensure n2_prime is positive  
+    n1_prime = (n1 - twist_num + 100*L1)%L1
+
+    site_index = Int(1+ L1*n2_prime + n1_prime)
+
+    return site_index 
 end 
 
 function get_M_for_single_visons(BCs)
@@ -324,6 +346,50 @@ function hop_single_vison(BCs,M_initial,initial_site)
     return M_final
 end 
 
+# This sections adds functions for plotting the real space lattice 
+function plot_real_space_lattice(BCs)
+    lattice_sites = zeros(BCs[1]*BCs[2],2)
+
+    y_extent = 4 #  Int(round((L1*a1+L2*a2)[2]*(1/(2*sqrt(3)))))+3
+    x_extent = 4 # Int(round((L1*a1-L2*a2)[1]/2))+2
+    display(x_extent)
+
+    site_index=1
+    for n2 = 0:(BCs[2]-1)
+        for n1 = 0:(BCs[1]-1)
+            r = n1*a1+n2*a2 
+            lattice_sites[site_index,:] = r
+            site_index +=1
+        end 
+    end 
+
+    hexbin(lattice_sites[:,1],lattice_sites[:,2].-1*nz[2],gridsize=(x_extent,y_extent),edgecolors="w")
+    scatter(lattice_sites[:,1],lattice_sites[:,2])
+end 
+
+function plot_links(BCs)
+
+    A_sites = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    z_links = [(r,r+rz) for r in A_sites]
+    x_links = [(r,r+rx) for r in A_sites]
+    y_links = [(r,r+ry) for r in A_sites]
+
+    zlinecollection = matplotlib.collections.LineCollection(z_links)
+    xlinecollection = matplotlib.collections.LineCollection(x_links)
+    ylinecollection = matplotlib.collections.LineCollection(y_links)
+
+    fig ,ax = subplots()
+    ax.add_collection(zlinecollection)
+    ax.add_collection(xlinecollection)
+    ax.add_collection(ylinecollection)
+    ax.autoscale()
+
+    return z_links
+end 
+
+#This section looks at energetics of adding visons to the system
+
 function plot_GS_energy_vs_vison_seperation(BCs)
     M0 = get_M0(BCs)
     M_initial = flip_bond_variable(M0,BCs,[0,0],"z")
@@ -365,22 +431,82 @@ function plot_GS_energy_max_seperated_visons_vs_system_size(L_Max,m)
     end 
 end 
 
-function plot_real_space_lattice(BCs)
-    lattice_sites = zeros(BCs[1]*BCs[2],2)
+function plot_energy_shift_due_to_vison_pair(BCs)
+    M0 = get_M0(BCs)
+    M = flip_bond_variable(M0,BCs,[0,0],"z")
 
-    y_extent = 4 #  Int(round((L1*a1+L2*a2)[2]*(1/(2*sqrt(3)))))+3
-    x_extent = 4 # Int(round((L1*a1-L2*a2)[1]/2))+2
-    display(x_extent)
+    E0 = svd(M0).S
+    E = svd(M).S
 
-    site_index=1
-    for n2 = 0:(BCs[2]-1)
-        for n1 = 0:(BCs[1]-1)
-            r = n1*a1+n2*a2 
-            lattice_sites[site_index,:] = r
-            site_index +=1
-        end 
-    end 
+    plot(E0,E-E0)
+end 
 
-    hexbin(lattice_sites[:,1],lattice_sites[:,2].-1*nz[2],gridsize=(x_extent,y_extent),edgecolors="w")
-    scatter(lattice_sites[:,1],lattice_sites[:,2])
+# This section adds functions for plotting the bond energy distribution around visons 
+
+function get_link_indices(BCs)
+    N = BCs[1]*BCs[2]
+    A_sites = [[n1,n2] for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    x_linked_B_sites = [r+nx-nz for r in A_sites]
+    y_linked_B_sites = [r+ny-nz for r in A_sites]
+
+    x_link_indices = [[j,convert_n1_n2_to_site_index(x_linked_B_sites[j],BCs)] for j = 1:N]
+    y_link_indices = [[j,convert_n1_n2_to_site_index(y_linked_B_sites[j],BCs)] for j = 1:N]
+    z_link_indices = [[j,j] for j=1:N]
+
+    return x_link_indices, y_link_indices, z_link_indices
+end 
+
+function calculate_F(M)
+    U,V = get_U_and_V(M)
+    F = U*V'
+
+    return F
+end 
+
+function calculate_link_energies(F,M,link_indices)
+   link_energy_matrix =  M.*F
+
+   link_energies = [link_energy_matrix[link_index[1],link_index[2]] for link_index in link_indices]
+
+   return link_energies
+end
+
+function plot_bond_energies_2D(M,BCs)
+
+    F = calculate_F(M)
+
+    A_sites = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    z_links = [(r,r+rz) for r in A_sites]
+    x_links = [(r,r+rx) for r in A_sites]
+    y_links = [(r,r+ry) for r in A_sites]
+
+    x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
+
+    link_energy_of_fluxless_system = 0.5250914141631111
+
+    x_link_energies = calculate_link_energies(F,M,x_link_indices) .- link_energy_of_fluxless_system
+    y_link_energies = calculate_link_energies(F,M,y_link_indices) .- link_energy_of_fluxless_system
+    z_link_energies = calculate_link_energies(F,M,z_link_indices) .- link_energy_of_fluxless_system
+
+    cmap = get_cmap("seismic") # Should choose a diverging colour map so that 0.5 maps to white 
+
+    max_energy = maximum(maximum.([abs.(x_link_energies),abs.(y_link_energies),abs.(z_link_energies)]))
+    display(max_energy)
+
+    xcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in x_link_energies]
+    ycolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in y_link_energies]
+    zcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in z_link_energies]
+
+    zlinecollection = matplotlib.collections.LineCollection(z_links,colors = zcolors,linewidths=2.5)
+    xlinecollection = matplotlib.collections.LineCollection(x_links,colors = xcolors,linewidths=2.5)
+    ylinecollection = matplotlib.collections.LineCollection(y_links,colors = ycolors,linewidths=2.5)
+
+    fig ,ax = subplots()
+    ax.add_collection(zlinecollection)
+    ax.add_collection(xlinecollection)
+    ax.add_collection(ylinecollection)
+    ax.autoscale()
+
 end 
