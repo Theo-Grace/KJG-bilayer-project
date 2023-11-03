@@ -61,7 +61,7 @@ function get_ImG0AA(Num_points=1000)
 end 
 
 function Interpolate_ImG0AA(w)
-    if abs(w) > 6
+    if abs(w) > 5.97
         Interpolated_ImG0AA = 0
     else
         b=findfirst((x -> x>w),ImG0AA_w_points)
@@ -121,7 +121,7 @@ function get_ReG0AB(Num_points=1000)
 end 
 
 function Interpolate_ReG0AB(w)
-    if abs(w) > 6
+    if abs(w) > 5.97
         Interpolated_ReG0AB = 0
     else
         b = findfirst((x -> x>w),ReG0AB_w_points)
@@ -272,19 +272,19 @@ function load_ImG0AB()
     group_name = "ImG0AB_data"
     g = fid[group_name]
     w_points = read(g["w_points"])
-    ReG0AB = read(g["Imaginary part of G0AB"])
+    ImG0AB = read(g["Imaginary part of G0AB"])
     close(fid)
 
     return w_points, ImG0AB
 end 
 
 # Use this to load the saved Green's functions
-#=
+
 ImG0AA_w_points, ImG0AA = load_ImG0AA()
 ReG0AA_w_points, ReG0AA = load_ReG0AA()
 ImG0AB_w_points, ImG0AB = load_ImG0AB()
 ReG0AB_w_points, ReG0AB = load_ReG0AB()
-=#
+
 
 function G0_at_w(w)
     G0AA = Interpolate_ReG0AA(w)+im*Interpolate_ImG0AA(w)
@@ -323,4 +323,310 @@ function get_V(Num_points=1000)
     end
     w_points = [-reverse(collect(LinRange(0.01,99,Num_points)));collect(LinRange(0.01,99,Num_points))]
     return w_points, V
+end 
+
+function Gf0_at_w(w)
+    G0_Majoranas = G0_at_w(w)
+    Gf0 = G0_Majoranas[1,1]+im*G0_Majoranas[1,2]
+
+    return Gf0
+end 
+
+function plot_Gf0()
+    Num_points = 1000
+    w_points = LinRange(-5.98,5.98,Num_points)
+    Gf0 = zeros(Complex{Float64},Num_points)
+    for (id,w) in enumerate(w_points)
+        Gf0[id] = Gf0_at_w(w)
+    end 
+
+    plot(w_points,real(Gf0))
+    plot(w_points,imag(Gf0))
+end 
+
+function plot_G0AB()
+        Num_points = 1000
+        w_points = LinRange(-5.98,5.98,Num_points)
+        Gf = zeros(Complex{Float64},Num_points)
+        for (id,w) in enumerate(w_points)
+            Gf[id] = 1/(1+4Gf0_at_w(w))
+            display(w)
+        end 
+
+    plot(w_points,real(Gf),color="b")
+    plot(w_points,imag(Gf),color="b",linestyle="dotted")
+end
+
+
+# This section is for a calculation based on real time correlators 
+
+function Delta_at_k(k)
+    Delta = 1 + exp(im*dot(k,a1)) + exp(im*dot(k,a2))
+    return Delta
+end
+
+function R_0k(k)
+    Delta = Delta_at_k(k)
+    abs_Delta = abs(Delta)
+    cos_phi = real(Delta)/abs_Delta
+    sin_phi = imag(Delta)/abs_Delta
+
+    R = [ 1 0 0 0 ; 1 0 0 0 ; 0 0 cos_phi sin_phi ; 0 0 -sin_phi cos_phi]
+
+    return R 
+end 
+
+function gamma_Greens_function(k,w)
+    Delta = abs(Delta_at_k(k))
+    f_plus = 1/(w+2*Delta) + 1/(w-2*Delta)
+    f_minus = 1/(w+2*Delta) - 1/(w-2*Delta)
+
+    G_k = [f_plus*I(2) -f_minus*I(2); f_minus*I(2) f_plus*I(2)]
+
+    return G_k
+end 
+
+function C_k_k_prime(k,k_prime)
+    w_k_prime = 2*abs(Delta_at_k(k_prime)) 
+    C_0 = [-im*I(2) I(2) ; -I(2) -im*I(2)]
+    R_k_prime = R_0k(k_prime)
+    R_k = R_0k(k)'
+    V_2x2 = V_at_w(w_k_prime/2)
+    V_4x4 = [V_2x2[1,1]*I(2) V_2x2[1,2]*I(2) ; V_2x2[2,1]*I(2) V_2x2[2,2]*I(2)]
+    Gk = gamma_Greens_function(k,w_k_prime)
+
+    display(Gk)
+
+    C = Gk*R_k*V_4x4*R_k_prime*C_0
+
+    return C
+end
+
+# This section adds code to calculate the density matrix for f fermions on the flux site 
+
+function Delta_k(k)
+    Delta = 1 + exp(im*dot(k,a1)) + exp(im*dot(k,a2))
+
+    cos_phi = real(Delta)/abs(Delta)
+
+    return abs(Delta) , cos_phi
+end 
+
+function plot_unit_cell_in_reciprocal_space(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    kx_points = [k[1] for k in k_lattice]
+    ky_points = [k[2] for k in k_lattice]
+
+    scatter(kx_points,ky_points)
+end 
+
+function calculate_on_site_fluxless_f_fermion_density(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    k_lattice = [(j1/L1)*g1 + (j2/L2 -(m*j1)/(L1*L2))*g2 for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+    
+    onsite_density = 0 
+
+    for k in k_lattice
+        abs_Delta_k , cos_phi_k = Delta_k(k)
+        onsite_density += 0.5*(1+cos_phi_k)
+    end 
+
+    return onsite_density/(L1*L2)
+end
+
+function calculate_on_site_fluxless_F00(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    k_lattice = [(j1/L1)*g1 + (j2/L2 -(m*j1)/(L1*L2))*g2 for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+    
+    onsite_F00 = 0 
+
+    for k in k_lattice
+        abs_Delta_k , cos_phi_k = Delta_k(k)
+        onsite_F00+= cos_phi_k
+    end 
+
+    return onsite_F00/(L1*L2)
+end
+
+function ImG0f00_ret_at_w(w,tol=1e-7)
+    G0f00_Integrand(theta) = (abs(w)/(8pi))*(1+sign(w)*((w^2+4-16*cos(theta)^2)/(4*abs(w))))*(((w^2+4)/8)*cos(theta)^2 - ((w^2-4)/16)^2 -cos(theta)^4)^(-1/2)
+    if 2<abs(w)<6
+        ImG0f00,est = quadgk(G0f00_Integrand,0,acos((abs(w)-2)/4),rtol=tol)
+    elseif 0<abs(w)<2
+        ImG0f00,est = quadgk(G0f00_Integrand,acos((2+abs(w))/4),acos((2-abs(w))/4),rtol=tol)
+    end
+    return ImG0f00
+end 
+
+function plot_ImG0f00_ret()
+    Num_points = 1000
+    w_points = LinRange(-5.98,5.98,Num_points)
+    ImG0f00 = zeros(Complex{Float64},Num_points)
+    for (id,w) in enumerate(w_points)
+        ImG0f00[id] = ImG0f00_ret_at_w(w,1e-5)
+    end 
+    plot(w_points,ImG0f00)
+end 
+
+function get_ImG0f00_ret(Num_points=1000)
+    ImG0f00= zeros(2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,5.9999,Num_points))
+        ImG0f00[Num_points+id] = ImG0f00_ret_at_w(w,1e-5)
+        ImG0f00[Num_points+1-id] = ImG0f00_ret_at_w(-w,1e-5)
+        display(id)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,5.99,Num_points)));collect(LinRange(0.01,5.99,Num_points))]
+    return w_points, ImG0f00
+end 
+
+function Interpolate_ImG0f00_ret(w)
+    if abs(w) > 5.97
+        Interpolated_ImG0f00 = 0
+    else
+        b=findfirst((x -> x>w),ImG0f00_w_points)
+        a=b-1
+        Interpolated_ImG0f00 = ImG0f00[a]+(w-ImG0f00_w_points[a])*(ImG0f00[b]-ImG0f00[a])/(ImG0f00_w_points[b]-ImG0f00_w_points[a])
+    end
+    return Interpolated_ImG0f00
+end 
+
+function ReG0f00_ret_at_w(w,tol=1e-7)
+    eta = 1e-6
+    Integrand(w_prime) = (-1/pi)*Interpolate_ImG0f00_ret(w_prime)*((w_prime-w)/((w_prime-w)^2+eta^2))
+    ReG0f00,est = quadgk(Integrand,-5.99,5.99,rtol=tol)
+    return ReG0f00
+end
+
+
+function plot_G0f00_ret()
+    Num_points = 1000
+    w_points = LinRange(-5.98,5.98,Num_points)
+    ImG0f00 = zeros(Complex{Float64},Num_points)
+    ReG0f00 = zeros(Complex{Float64},Num_points)
+    for (id,w) in enumerate(w_points)
+        ImG0f00[id] = ImG0f00_ret_at_w(w,1e-5)
+        ReG0f00[id] = ReG0f00_ret_at_w(w,1e-6)
+    end 
+    plot(w_points,ImG0f00,linestyle="dashed")
+    plot(w_points,ReG0f00)
+end 
+
+function plot_Gf_at_00()
+    Num_points = 1000
+    w_points = LinRange(0.01,5.98,Num_points)
+    Gf = zeros(Complex{Float64},Num_points)
+    V00 = zeros(Num_points)
+    for (id,w) in enumerate(w_points)
+        if abs(abs(w)-2)<0.01
+            w=1.98
+        end 
+        Gf[id] = (ReG0f00_ret_at_w(w,1e-5)+im*sign(w)ImG0f00_ret_at_w(w,1e-5))/(1+4*(ReG0f00_ret_at_w(w,1e-5)+im*sign(w)ImG0f00_ret_at_w(w,1e-5)))
+        V00[id] = 1/abs(1+4*((ReG0f00_ret_at_w(w,1e-5)+im*sign(w)ImG0f00_ret_at_w(w,1e-5))))^2
+        display(w)
+    end 
+    #plot(w_points,real(Gf))
+    plot(w_points,imag(Gf),linestyle="dashed")
+    plot(w_points,V00,color="b")
+end 
+
+
+function calculate_on_vison_pair_site_f_fermion_density(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    k_lattice = [(j1/L1)*g1 + (j2/L2 -(m*j1)/(L1*L2))*g2 for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+    
+    onsite_density = 0 
+
+    for k in k_lattice
+        abs_Delta_k , cos_phi_k = Delta_k(k)
+        onsite_density += 0.5*(1+cos_phi_k)/(abs(1+4*(ReG0f00_ret_at_w(2*0.99*abs_Delta_k,1e-5)+im*ImG0f00_ret_at_w(2*0.99*abs_Delta_k,1e-5)))^2)
+    end 
+
+    return onsite_density/(L1*L2)
+end
+
+function ImG0f0r_ret_at_w(w,n1,n2,tol=1e-7)
+    G0f0r_Integrand(theta) = (abs(w)/(8pi))*cos((n1-n2)*theta)*(1+sign(w)*((w^2+4-16*cos(theta)^2)/(4*abs(w))))*(((w^2+4)/8)*cos(theta)^2 - ((w^2-4)/16)^2 -cos(theta)^4)^(-1/2)
+    if 2<abs(w)<6
+        ImG0f0r,est = quadgk(G0f0r_Integrand,0,acos((abs(w)-2)/4),rtol=tol)
+    elseif 0<abs(w)<2
+        ImG0f0r,est = quadgk(G0f0r_Integrand,acos((2+abs(w))/4),acos((2-abs(w))/4),rtol=tol)
+    end
+    return ImG0f0r
+end 
+
+function plot_ImG0f0r_ret(n1,tol=1e-5)
+    Num_points = 1000
+    w_points = LinRange(-5.98,5.98,Num_points)
+    ImG0f0r = zeros(Complex{Float64},Num_points)
+    for (id,w) in enumerate(w_points)
+        ImG0f0r[id] = ImG0f0r_ret_at_w(w,n1,-n1,tol)
+    end 
+    plot(w_points,ImG0f0r)
+end 
+
+function get_ImG0f0r_ret(n1,n2,Num_points=1000)
+    ImG0f0r= zeros(2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,5.9999,Num_points))
+        ImG0f0r[Num_points+id] = ImG0f0r_ret_at_w(w,n1,n2,1e-5)
+        ImG0f0r[Num_points+1-id] = ImG0f0r_ret_at_w(-w,n1,n2,1e-5)
+        display(id)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,5.99,Num_points)));collect(LinRange(0.01,5.99,Num_points))]
+    return w_points, ImG0f0r
+end 
+
+function Interpolate_func(point,func,w_domain)
+    if abs(point) > 5.97
+        Interpolated_func = 0
+    else
+        b=findfirst((x -> x>point),w_domain)
+        a=b-1
+        Interpolated_func = func[a]+(point-w_domain[a])*(func[b]-func[a])/(w_domain[b]-w_domain[a])
+    end
+    return Interpolated_func
+end
+
+function Kramers_Kronig_at_w(w_point,func,w_domain,tol=1e-5)
+    eta = 1e-6
+    Integrand(w_prime) = (-1/pi)*Interpolate_func(w_prime,func,w_domain)*((w_prime-w_point)/((w_prime-w_point)^2+eta^2))
+    KK_func,est = quadgk(Integrand,-5.97,5.97,rtol=tol)
+    return KK_func
+end
+
+function plot_G0f0r_ret(n1,tol=1e-5)
+    Num_points = 1000
+    w_points = LinRange(-5.98,5.98,Num_points)
+    ImG0f0r = zeros(Complex{Float64},Num_points)
+    ImG0f00 = zeros(Complex{Float64},Num_points)
+    ReG0f0r = zeros(Complex{Float64},Num_points)
+    ReG0f00 = zeros(Complex{Float64},Num_points)
+    ImGf0r = zeros(Complex{Float64},Num_points)
+    for (id,w) in enumerate(w_points)
+        ImG0f0r[id] = ImG0f0r_ret_at_w(w,n1,-n1,tol)
+        ImG0f00[id] = ImG0f0r_ret_at_w(w,0,0,tol)
+    end 
+    for (id,w0) in enumerate(w_points)
+        ReG0f0r[id] = Kramers_Kronig_at_w(w0,ImG0f0r,w_points)
+        ReG0f00[id] = Kramers_Kronig_at_w(w0,ImG0f00,w_points)
+        ImGf0r[id] = (ImG0f0r[id]+4*(ReG0f00[id]*ImG0f0r[id]-ReG0f0r[id]*ImG0f00[id]))/(abs(1+4*(ReG0f00[id]+im*ImG0f00[id]))^2)
+    end 
+    #plot(w_points,ReG0f0r)
+    #plot(w_points,ImG0f0r,linestyle="dashed")
+    plot(w_points,ImGf0r,linestyle="dashed")
 end 

@@ -27,8 +27,8 @@ nx = [-2,1]./3
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
 # sets default boundary conditions
-L1 = 50
-L2 = 50
+L1 = 29
+L2 = 29
 m = 0
 BCs = [L1,L2,m]
 
@@ -44,6 +44,8 @@ function dual(A1,A2)
 
     return v1, v2 
 end
+
+g1,g2 = dual(a1,a2)
 
 function brillouinzone(g1, g2, N, half=true)
     
@@ -154,7 +156,7 @@ function convert_n1_n2_to_site_index(n1n2vec,BCs)
     m = BCs[3]
 
     # First translate n1,n2 back into the cell
-    twist_num = floor(n2/L2)
+    twist_num = floor(n2/L2)*m
     n2_prime = (n2+100*L2)%L2 # The + 100L2 term is to try and ensure n2_prime is positive  
     n1_prime = (n1 - twist_num + 100*L1)%L1
 
@@ -206,6 +208,29 @@ function get_M_for_single_visons(BCs)
     M[1:L1,1:L1] = A_flipped
     return M 
 end 
+
+function get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+    """
+    Creates a chain of flipped z and y links across half of the a2 boundary, creating 2 visons at the ends of the chain 
+    """
+    M = get_M0(BCs) 
+
+    L1 = BCs[1]
+    L2 = BCs[2]
+
+    for j = Int(L1*(floor(L2/2))):-L1:1
+        M[j+1,j+1] = -1 # flips the z link on the a2 boundary 
+        M[j+1,j-L1+1] = -1 #flips the y link on the a2 boundary 
+    end 
+    M[1,1] = -1 # flips the z link at the origin 
+
+    return M 
+end 
+
+# This section creates two commonly used matrices M0 and Mv
+M0 = get_M0(BCs)
+Mv = flip_bond_variable(M0,BCs,[10,10],"z") # vison pair at [0,0] with z orientation
+M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
 
 function get_X_and_Y(BCs)
     M0 = get_M0(BCs)
@@ -510,3 +535,321 @@ function plot_bond_energies_2D(M,BCs)
     ax.autoscale()
 
 end 
+
+function plot_bond_energies_2D_repeated_cell(M,BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+    
+    F = calculate_F(M)
+
+    A_sites = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
+
+    z_links = [(r,r+rz) for r in A_sites]
+    x_links = [(r,r+rx) for r in A_sites]
+    y_links = [(r,r+ry) for r in A_sites]
+
+    x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
+
+    link_energy_of_fluxless_system = 0.5250914141631111
+
+    x_link_energies = calculate_link_energies(F,M,x_link_indices) .- link_energy_of_fluxless_system
+    y_link_energies = calculate_link_energies(F,M,y_link_indices) .- link_energy_of_fluxless_system
+    z_link_energies = calculate_link_energies(F,M,z_link_indices) .- link_energy_of_fluxless_system
+
+    cmap = get_cmap("seismic") # Should choose a diverging colour map so that 0.5 maps to white 
+
+    max_energy = maximum(maximum.([abs.(x_link_energies),abs.(y_link_energies),abs.(z_link_energies)]))
+    display(max_energy)
+
+    xcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in x_link_energies]
+    ycolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in y_link_energies]
+    zcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in z_link_energies]
+
+    fig ,ax = subplots()
+    for shift_vector in shift_vectors
+        z_links = [(r+shift_vector,r+rz+shift_vector) for r in A_sites]
+        x_links = [(r+shift_vector,r+rx+shift_vector) for r in A_sites]
+        y_links = [(r+shift_vector,r+ry+shift_vector) for r in A_sites]
+        
+        zlinecollection = matplotlib.collections.LineCollection(z_links,colors = zcolors,linewidths=2.5)
+        xlinecollection = matplotlib.collections.LineCollection(x_links,colors = xcolors,linewidths=2.5)
+        ylinecollection = matplotlib.collections.LineCollection(y_links,colors = ycolors,linewidths=2.5)
+
+        ax.add_collection(zlinecollection)
+        ax.add_collection(xlinecollection)
+        ax.add_collection(ylinecollection)
+    end 
+    ax.autoscale()
+end 
+
+function plot_low_energy_Majorana_distribution(M,BCs,excited_state_num=0)
+    N = BCs[1]*BCs[2]
+    
+    SVD_M = svd(M)
+    U = SVD_M.U
+    V = (SVD_M.V)'
+    E = SVD_M.S
+
+    State_energy = E[N-excited_state_num]
+    display("Energy is $State_energy")
+
+    cA_distribution = U[:,(N-excited_state_num)]
+    cB_distribution = V[:,(N-excited_state_num)]
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    cmap = get_cmap("PuOr")
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+    ax2.scatter(A_site_x_coords,A_site_y_coords,color = cmap.((cA_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+    #ax2.scatter(A_site_x_coords,A_site_y_coords.+rz[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+    ax2.scatter(0,0,alpha=0,zorder=4)
+end
+
+function plot_low_energy_Majorana_distribution_repeated_cells(M,BCs,excited_state_num=0)
+    N = BCs[1]*BCs[2]
+    
+    SVD_M = svd(M)
+    U = SVD_M.U
+    V = (SVD_M.V)'
+    E = SVD_M.S
+
+    State_energy = E[N-excited_state_num]
+    display("Energy is $State_energy")
+
+    cA_distribution = U[:,(N-excited_state_num)]
+    cB_distribution = V[(N-excited_state_num),:]
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    cmap = get_cmap("PuOr")
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+
+    shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
+
+    for shift_vec in shift_vectors
+        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2],color = cmap.((cA_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+        #ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+rz[2].+shift_vec[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+    end 
+    ax2.scatter(0,0,alpha=0,zorder=4)
+end
+
+function plot_F_at_site_n1_n2(M,BCs,r_n1_n2)
+    N = BCs[1]*BCs[2]
+    
+    SVD_M = svd(M)
+    U = SVD_M.U
+    V = (SVD_M.Vt)'
+    F = U*V'
+    display(F)
+
+    site_r_index = convert_n1_n2_to_site_index(r_n1_n2,BCs)
+    display(site_r_index)
+
+    F_r_R = F[:,site_r_index]
+
+    display(F_r_R)
+    F_max = maximum(abs.(F_r_R))
+    display(F_max)
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    cmap = get_cmap("seismic")
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+
+    ax2.scatter(A_site_x_coords,A_site_y_coords.+rz[2],color = cmap.((F_r_R./F_max).+0.5),zorder=2)
+    ax2.scatter(0,0,alpha=0,zorder=4)
+end
+
+function plot_delta_F_at_site_n1_n2(M,BCs,r_n1_n2)
+    N = BCs[1]*BCs[2]
+    
+    SVD_M = svd(M)
+    U = SVD_M.U
+    V = (SVD_M.Vt)'
+    F = U*V'
+   
+    F0 = calculate_F(M0)
+
+    delta_F = F-F0
+
+    site_r_index = convert_n1_n2_to_site_index(r_n1_n2,BCs)
+   
+
+    delta_F_r_R = delta_F[:,site_r_index]
+
+    delta_F_max = maximum(abs.(delta_F_r_R))
+    display(delta_F_max)
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    cmap = get_cmap("seismic")
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+
+    ax2.scatter(A_site_x_coords,A_site_y_coords.+rz[2],color = cmap.((delta_F_r_R./delta_F_max).+0.5),zorder=2)
+    ax2.scatter(0,0,alpha=0,zorder=4)
+end
+
+function plot_greater_Greens_function_for_f_fermions(M,BCs,r1_n1_n2=[0,0],r2_n1_n2=[0,0])
+    SVD_M = svd(M)
+    U=SVD_M.U
+    V=SVD_M.V
+    E=reverse(SVD_M.S)
+
+    X = 0.5*(U+V)
+
+    Num_bins = 25
+
+    w = LinRange(0,3,Num_bins)
+
+    G_gtr_w = zeros(Num_bins)
+
+    binsize = 3/(Num_bins-1)
+
+    site_index1 = convert_n1_n2_to_site_index(r1_n1_n2,BCs)
+    site_index2 = convert_n1_n2_to_site_index(r2_n1_n2,BCs)
+
+    j=1
+    Energy = E[1]
+    for (bin_index,E_bin) in enumerate(w)
+        display(E_bin)
+        while Energy < E_bin + binsize && j <= size(E)[1]
+            Energy = E[j]
+            G_gtr_w[bin_index] += X[site_index1,j]*X[site_index2,j]
+            j +=1 
+        end 
+        display(G_gtr_w[bin_index])
+    end 
+
+    plot(w,G_gtr_w)
+end
+
+function plot_Greens_function_for_f_fermions(M,BCs,r_n1_n2=[0,0])
+    SVD_M = svd(M)
+    U=SVD_M.U
+    V=SVD_M.V
+    E=(SVD_M.S).*2
+
+    X = 0.5*(U+V)
+
+    Num_bins = 25
+    eta = 10^(-6)
+
+    w = reverse(LinRange(0,6,Num_bins))
+
+    Im_G_w = zeros(Num_bins)
+    Re_G_w = zeros(Num_bins)
+
+    binsize = 6/(Num_bins-1)
+
+    site_index = convert_n1_n2_to_site_index(r_n1_n2,BCs)
+
+    onsite_density = 0
+
+    j=1
+    Energy = E[1]
+    for (bin_index,E_bin) in enumerate(w)
+        display(E_bin)
+        while Energy > E_bin - binsize/2 && j <= size(E)[1]
+            Energy = E[j]
+            Im_G_w[bin_index] += pi*X[1,j]*X[site_index,j]/(binsize)
+            onsite_density += X[site_index,j]*X[site_index,j]
+            j +=1 
+        end 
+        #Re_G_w[bin_index] = (X*diagm((E.-E_bin)./(((E.-E_bin).^2).+eta^2))*X')[site_index,site_index]
+    end 
+    display(onsite_density)
+
+    Im_G_w[1] = 2*Im_G_w[1]
+    plot(w,Im_G_w)
+    #plot(w,Re_G_w)
+end
+
+function plot_f_fermion_density(M,BCs)
+    N = BCs[1]*BCs[2]
+    
+    SVD_M = svd(M)
+    U = SVD_M.U
+    V = (SVD_M.Vt)'
+    E = SVD_M.S
+
+    X=0.5*(U+V)
+    Y=0.5*(U-V)
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    delta_f_density = zeros(N)
+    f0_density = 0.762436
+    for site_index  = 1:N
+        delta_f_density[site_index] = (X*X')[site_index,site_index] - f0_density
+    end 
+    display(delta_f_density)
+
+    cmap = get_cmap("seismic") # SHould choose a sequential colour map 
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+    ax2.scatter(A_site_x_coords,A_site_y_coords,color = cmap.((delta_f_density./maximum(delta_f_density)).+0.5),zorder=2)
+    #ax2.scatter(A_site_x_coords,A_site_y_coords.+rz[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+    ax2.scatter(0,0,alpha=0,zorder=4)
+end
