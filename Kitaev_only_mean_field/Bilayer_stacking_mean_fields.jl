@@ -4,6 +4,7 @@ ASSUMPTIONS:
 - No magnetic ordering
 - Isotropic couplings (all bond types equivalent)
 
+Date created 8/12/2023
 =#
 using HDF5
 using LinearAlgebra
@@ -30,6 +31,10 @@ My = [0 0 1 0; 0 0 0 1; -1 0 0 0; 0 -1 0 0]
 Mz = [0 0 0 1; 0 0 -1 0; 0 1 0 0 ; -1 0 0 0]
 M_alpha = [Mx,My,Mz]
 
+# Sets the initial guesses
+Ux_layer_1 = [-0.5 0 0 0 ; 0 0.5 0 0 ; 0 0 0 0 ; 0 0 0 0 ]
+Ux_layer_2 = [0.5 0 0 0 ; 0 -0.5 0 0 ; 0 0 0 0 ; 0 0 0 0 ]
+U_interlayer = [0.5 0 0 0 ; 0 0.2 0 0 ; 0 0 0 0 ; 0 0 0 0 ]
 function dual(A1,A2)
     """
     Calculates the 2D dual vectors for a given set of 2D lattice vectors 
@@ -68,7 +73,7 @@ function brillouinzone(g1, g2, N, half=true)
 end
 
 # This section calculates the dual vectors and makes a matrix of vectors in the Brillouin zone
-N = 24
+N = 12
 g1, g2 = dual(a1,a2)
 BZ = brillouinzone(g1,g2,N,false) # N must be even
 half_BZ = brillouinzone(g1,g2,N,true)
@@ -112,41 +117,128 @@ function Kitaev_block(Ux_mean_fields,k)
     """
     MK = zeros(Complex{Float64},4,4)
     for alpha = [1,2,3]
-        MK += -im*exp(-im*dot(k,nn[alpha]))*M_alpha[alpha]*transform_bond_type(Ux_mean_fields,alpha)*M_alpha[alpha]
+        MK += im*(K/4)*exp(-im*dot(k,nn[alpha]))*M_alpha[alpha]*transform_bond_type(Ux_mean_fields,alpha)*M_alpha[alpha]
     end 
     return MK
 end
 
-function AB_interlayer_block(U_interlayer_mean_fields)
+# This section is specialised to the monolayer 
+function update_monolayer_mean_fields(Ux_layer_1)
+    new_Ux_1 = zeros(Complex{Float64},4,4)
+    for k in BZ
+        MK = Kitaev_block(Ux_layer_1,k)
+        H_K = [zeros(4,4) MK ; MK' zeros(4,4)]
+        R, O = diagonalise(H_K)
+        all_fields = transpose(R')*(O)*transpose(R)
+        new_Ux_1 += exp(-im*dot(k,nn[1]))*all_fields[1:4,5:8]
+    end 
+
+    return imag.(new_Ux_1/N^2)
+end 
+
+function AB_interlayer_block(U_interlayer_mean_fields,J_perp)
     M_perp = zeros(Complex{Float64},4,4)
     for alpha = [1,2,3]
-        M_perp += -im*M_alpha[alpha]*U_interlayer_mean_fields*M_alpha[alpha]
+        M_perp += -im*(J_perp/4)*M_alpha[alpha]*U_interlayer_mean_fields*M_alpha[alpha]
     end 
     return M_perp
 end 
 
-function AB_Hamiltonian(Ux_layer_1,Ux_layer_2,U_interlayer,k)
+function AB_Hamiltonian(Ux_layer_1,Ux_layer_2,U_interlayer,k,J_perp=0.0)
     MK1 = Kitaev_block(Ux_layer_1,k)
     MK2 = Kitaev_block(Ux_layer_2,k)
-    M_perp = AB_interlayer_block(U_interlayer)
+    M_perp = AB_interlayer_block(U_interlayer,J_perp)
 
-    H_AB = [0 MK1 0 M_perp ; MK1' 0 0 0 ; 0 0 0 transpose(MK2) ; M_perp' 0 conj(MK2) 0]
+    H_AB = [zeros(4,4) MK1 zeros(4,4) M_perp ; MK1' zeros(4,4) zeros(4,4) zeros(4,4) ; zeros(4,4) zeros(4,4) zeros(4,4) transpose(MK2) ; M_perp' zeros(4,4) conj(MK2) zeros(4,4)]
     return H_AB 
 end 
 
-function update_mean_fields(Ux_layer_1,Ux_layer_2,U_interlayer)
-    new_Ux_1 = zeros(Complex{Float64},0,0)
-    new_Ux_2 = zeros(Complex{Float64},0,0)
-    new_U_interlayer = zeros(Complex{Float64},0,0)
+function update_mean_fields(Ux_layer_1,Ux_layer_2,U_interlayer,J_perp)
+    new_Ux_1 = zeros(Complex{Float64},4,4)
+    new_Ux_2 = zeros(Complex{Float64},4,4)
+    new_U_interlayer = zeros(Complex{Float64},4,4)
     for k in BZ
-        H_AB = AB_Hamiltonian(Ux_layer_1,Ux_layer_2,U_interlayer,k)
+        H_AB = AB_Hamiltonian(Ux_layer_1,Ux_layer_2,U_interlayer,k,J_perp)
         R, O = diagonalise(H_AB)
-        all_fields = R*O*R'
+        all_fields = conj(R)*O*conj(R')
         new_Ux_1 += exp(-im*dot(k,nn[1]))*all_fields[1:4,5:8]
         new_Ux_2 += exp(-im*dot(k,nn[1]))*all_fields[9:12,13:16]
         new_U_interlayer += all_fields[1:4,13:16]
     end 
 
-    return im*new_Ux_1/N, im*new_Ux_2/N , im*new_U_interlayer/N
+    return imag.(new_Ux_1/N^2), imag.(new_Ux_2/N^2) , imag.(new_U_interlayer/N^2)
 end 
 
+function run_to_convergence(initial_Ux_1,initial_Ux_2,initial_U_perp,J_perp,tolerance=10.0,tol_drop_iteration=500)
+
+    initial_mean_fields = [initial_Ux_1 initial_Ux_2 initial_U_perp]
+    old_mean_fields = initial_mean_fields
+    new_mean_fields = old_mean_fields
+    new_Ux_1 = zeros(4,4)
+    new_Ux_2 = zeros(4,4)
+    new_U_perp = zeros(4,4)
+
+    #old_old_mean_fields = zeros(8,8)
+    tol = 10^(-tolerance)
+    it_num = 0 
+    osc_num = 0
+    not_converged = true
+    not_oscillating = true 
+    mark_with_x = false
+    while not_converged
+        new_Ux_1,new_Ux_2,new_U_perp = update_mean_fields(old_mean_fields[1:4,1:4],old_mean_fields[1:4,5:8],old_mean_fields[1:4,9:12],J_perp)
+        new_mean_fields = [new_Ux_1 new_Ux_2 new_U_perp]
+        diff= abs.(new_mean_fields-old_mean_fields)
+        #diff2 = abs.(new_mean_fields - old_old_mean_fields)
+        not_converged = any(diff .> tol)
+        println(it_num)
+
+        #=
+        not_oscillating = any(diff2 .> 0.01*tol)
+        if not_oscillating == false
+            osc_num += 1
+            println("osc number is $osc_num")
+            display(diff.*(diff .>tol))
+            display(diff2.*(diff2 .>tol))
+        else
+            osc_num = 0
+        end
+
+        if osc_num >= 10
+            println("Oscillating solution")
+            mark_with_x = true
+            break
+        end
+        =#
+        if it_num%tol_drop_iteration == 0 && it_num >0
+            tol = 10*tol
+            println(tol)
+            mark_with_x = true
+        end
+
+        it_num +=1 
+        #old_old_mean_fields = old_mean_fields
+        old_mean_fields = new_mean_fields
+    end
+    new_Ux_1 = new_mean_fields[1:4,1:4]
+    new_Ux_2 = new_mean_fields[1:4,5:8]
+    new_U_interlayer = new_mean_fields[1:4,9:12]
+    return round.(new_Ux_1,digits=trunc(Int,tolerance)) ,round.(new_Ux_2,digits=trunc(Int,tolerance)),round.(new_U_interlayer,digits=trunc(Int,tolerance))
+end
+
+function scan_J_perp_for_AB_stacking(J_perp_min,J_perp_max,num_points)
+    J_perp_points = LinRange(J_perp_min,J_perp_max,num_points)
+    for J_perp in J_perp_points
+        Ux_1 ,Ux_2, U_perp = run_to_convergence(Ux_layer_1,Ux_layer_2,U_interlayer,J_perp,3.0)
+        U00_1 = Ux_1[1,1]
+        U11_1 = Ux_1[2,2]
+        U00_2 = Ux_2[1,1]
+        U11_2 = Ux_2[2,2]
+        U00_perp = U_perp[1,1]
+        U11_perp = U_perp[2,2]
+        scatter(J_perp,U00_1,color="b")
+        scatter(J_perp,U11_1,color="g")
+        scatter(J_perp,U00_perp,color="r")
+        scatter(J_perp,U11_perp,color="purple")
+    end 
+end 
