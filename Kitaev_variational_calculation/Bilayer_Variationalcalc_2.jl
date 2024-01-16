@@ -26,12 +26,6 @@ nx = [-2,1]./3
 
 nn = [nx,ny,nz] # stores the nearest neighbours in a vector
 
-# sets default boundary conditions
-L1 = 29
-L2 = 29
-m = 0
-BCs = [L1,L2,m]
-
 function dual(A1,A2)
     """
     Calculates the 2D dual vectors for a given set of 2D lattice vectors 
@@ -140,7 +134,7 @@ function flip_bond_variable(M,BCs,bond_site,bond_flavour)
     end 
     M_flipped=zeros(L1*L2,L1*L2)
     M_flipped[:,:] = M
-    M_flipped[C_A_index,C_B_index] = -1
+    M_flipped[C_A_index,C_B_index] = -M[C_A_index,C_B_index]
     #M[C_A_index,C_B_index] = 1
     return M_flipped
 end 
@@ -163,6 +157,32 @@ function convert_n1_n2_to_site_index(n1n2vec,BCs)
     site_index = Int(1+ L1*n2_prime + n1_prime)
 
     return site_index 
+end 
+
+function convert_bond_to_site_indicies(BCs,bond_site,bond_flavour)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    C_A_index = 1 + bond_site[1] + L1*bond_site[2]
+
+    if bond_flavour == "z"
+        C_B_index = C_A_index
+    elseif bond_flavour == "y"
+        if bond_site[2] == 0
+            C_B_index = L1*(L2-1) + m + C_A_index
+        else
+            C_B_index = C_A_index - L1
+        end 
+    else
+        if bond_site[1] == 0 
+            C_B_index = C_A_index + L1 -1
+        else 
+            C_B_index = C_A_index -1 
+        end 
+    end 
+
+    return C_A_index, C_B_index
 end 
 
 function get_M_for_single_visons(BCs)
@@ -211,7 +231,8 @@ end
 
 function get_M_for_max_seperated_visons_along_a2_boundary(BCs)
     """
-    Creates a chain of flipped z and y links across half of the a2 boundary, creating 2 visons at the ends of the chain 
+    Creates a chain of flipped z and y links across half of the a2 boundary, creating 2 visons at the ends of the chain
+    The chain ends with flipped z links  
     """
     M = get_M0(BCs) 
 
@@ -227,10 +248,21 @@ function get_M_for_max_seperated_visons_along_a2_boundary(BCs)
     return M 
 end 
 
-# This section creates two commonly used matrices M0 and Mv
-M0 = get_M0(BCs)
-Mv = flip_bond_variable(M0,BCs,[10,10],"z") # vison pair at [0,0] with z orientation
-M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+function flip_bond_on_one_layer(M,BCs,bond_site,bond_flavour)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    f_A_index, f_B_index = convert_bond_to_site_indicies(BCs,bond_site,bond_flavour)
+
+    M_flipped=zeros(L1*L2,L1*L2)
+    A = zeros(L1*L2,L1*L2)
+    M_flipped[:,:] = M
+    M_flipped[f_A_index,f_B_index] = 0
+    A[f_A_index,f_B_index] = 1
+
+    return M_flipped, A 
+end 
 
 function get_X_and_Y(BCs)
     M0 = get_M0(BCs)
@@ -284,6 +316,11 @@ function calculate_D(BCs,U,V,Num_flipped_bonds)
         D=-1
         display("matter fermion free ground state for $Num_flipped_bonds flipped links is unphysical, must have odd number of matter fermions")
     end
+
+    display("The determinant of U is...")
+    display(det(U))
+    display("The determinant of V is...")
+    display(det(V))
 
     return D
 end 
@@ -803,7 +840,7 @@ function plot_Greens_function_for_f_fermions(M,BCs,r_n1_n2=[0,0])
         while Energy > E_bin - binsize/2 && j <= size(E)[1]
             Energy = E[j]
             Im_G_w[bin_index] += pi*X[1,j]*X[site_index,j]/(binsize)
-            onsite_density += X[site_index,j]*X[site_index,j]
+            onsite_density += X[1,j]*X[site_index,j]
             j +=1 
         end 
         #Re_G_w[bin_index] = (X*diagm((E.-E_bin)./(((E.-E_bin).^2).+eta^2))*X')[site_index,site_index]
@@ -853,3 +890,362 @@ function plot_f_fermion_density(M,BCs)
     #ax2.scatter(A_site_x_coords,A_site_y_coords.+rz[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2)
     ax2.scatter(0,0,alpha=0,zorder=4)
 end
+
+# This section adds functions to calculate hopping parameters for the Bilayer model 
+
+function calculate_interlayer_pair_hopping_for_min_seperated_visons(BCs)
+    M0 = get_M0(BCs)
+    M_1 = flip_bond_variable(M0,BCs,[0,0],"z")
+    M_2 = flip_bond_variable(M0,BCs,[0,0],"y") # hops the vison by flipping 2 bonds, moving the vison at the origin in the a2 direction
+
+    # matrices labelled 1 refer to the original link configuration (vison pair with z orientation at the origin)
+    U1,V1 = get_U_and_V(M_1)
+    # matrices labelled 2 refer to the hopped vison link configuration (vison pair with y orientation at the origin)
+    U2,V2 = get_U_and_V(M_2)
+
+    X21 = 0.5*(U2'*U1+V2'*V1)
+    Y21 = 0.5*(U2'*U1-V2'*V1)
+    
+
+    #Z21 = inv(X21)*Y21
+    hop_parameter = abs(det(X21))*(1+(U1*V1')[1,1])
+    D1 = calculate_D(BCs,U1,V1,1)
+
+    #display(det(U1))
+    #display(det(V1))
+    D2 = calculate_D(BCs,U2,V2,1)
+    #display(det(U2))
+    #display(det(V2))
+
+    #display(det(X21))
+    #display(hop_parameter)
+    return hop_parameter, D1, D2
+end 
+
+function calculate_interlayer_pair_hopping_for_max_seperated_visons(BCs)
+    M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+    M_hopped = flip_bond_variable(M_max,BCs,[0,0],"z")
+    M_hopped = flip_bond_variable(M_hopped,BCs,[0,1],"y") # hops the vison by flipping 2 bonds, moving the vison at the origin in the a2 direction
+
+    # matrices labelled 1 refer to the original link configuration (max seperation)
+    U1,V1 = get_U_and_V(M_max)
+    # matrices labelled 2 refer to the hopped vison link configuration 
+    U2,V2 = get_U_and_V(M_hopped)
+
+    X21 = 0.5*(U2'*U1+V2'*V1)
+    Y21 = 0.5*(U2'*U1-V2'*V1)
+    
+
+    #Z21 = inv(X21)*Y21
+    hop_parameter = det(X21)*(1+(U1*V1')[1,1])
+    D1 = calculate_D(BCs,U1,V1,Int(floor(BCs[2]/2)))
+
+    display(det(U1))
+    display(det(V1))
+    D2 = calculate_D(BCs,U2,V2,Int(floor(BCs[2]/2))-2)
+    display(det(U2))
+    display(det(V2))
+
+    display(det(X21))
+    #display(hop_parameter)
+    return hop_parameter, D1, D2
+end 
+
+function plot_interlayer_pair_hopping_vs_system_size(N_max,twist,N_min=5)
+    hopping_values = zeros(N_max-N_min+1)
+    mark = "o"
+
+    colours = ["blue","red","green","orange"]
+
+    for (id,N) = enumerate(N_min:N_max)
+        hopping_values[id], D1, D2  = calculate_interlayer_pair_hopping_for_max_seperated_visons([Int(ceil(N/2)),N,twist])
+        if D1 == D2
+            if D1 == 1 
+                mark = "o"
+            else
+                mark= "^"
+            end 
+        else
+            mark = "x"
+        end 
+        scatter(1/N,hopping_values[id],marker=mark,color = colours[twist+1])
+    end 
+end 
+
+function plot_pair_hopping_vs_system_size(N_max,twist,N_min=5)
+    hopping_values = zeros(N_max-N_min+1)
+    mark = "o"
+
+    colours = ["red","green","orange"]
+
+    for (id,N) = enumerate(N_min:N_max)
+        hopping_values[id], D1, D2  = calculate_interlayer_pair_hopping_for_min_seperated_visons([Int(ceil(N/2)),N,twist])
+        if D1 == D2
+            if D1 == 1 
+                mark = "o"
+            else
+                mark= "^"
+            end 
+        else
+            mark = "x"
+        end 
+        scatter(1/N,hopping_values[id],marker=mark,color = colours[twist+1])
+    end 
+end 
+
+
+function calculate_parity_of_fluxless_ground_state(L1_max,L2_max,twist)
+    for L1 = 3:L1_max
+        for L2 = 3:L2_max
+            M0 = get_M0([L1,L2,twist])
+            Mv = flip_bond_variable(M0,[L1,L2,twist],[0,0],"z")
+            #Mv = flip_bond_variable(Mv,[L1,L2,twist],[0,1],"y")
+            U,V = get_U_and_V(M0)
+            D = calculate_D(M0,U,V,0)
+            if D == 1
+                scatter(L1,L2,color="r")
+            end 
+        end 
+    end 
+end 
+
+function plot_det_M0_vs_BCs(L1_max,L2_max,twist)
+    for L1 = 3:L1_max
+        for L2 = 3:L2_max
+            M0 = get_M0([L1,L2,twist])
+            det_M = det(M0)
+            sgn_det = sign(det_M)
+            if (svd(M0).S)[end] >0.1
+                if sgn_det == 1
+                    scatter(L1,L2,color="r")
+                elseif sgn_det == -1
+                    scatter(L1,L2,color="b")
+                end 
+            end 
+        end 
+    end 
+end 
+
+function plot_det_Mv_2_flips_vs_BCs(L1_max,L2_max,twist)
+    for L1 = 3:L1_max
+        for L2 = 3:L2_max
+            M0 = get_M0([L1,L2,twist])
+            Mv = flip_bond_variable(M0,[L1,L2,twist],[0,0],"x")
+            Mv = flip_bond_variable(M0,[L1,L2,twist],[0,0],"y")
+            det_M = det(Mv)
+            sgn_det = sign(det_M)
+            if (svd(Mv).S)[end] >0.02
+                if sgn_det == 1
+                    scatter(L1,L2,color="r")
+                elseif sgn_det == -1
+                    scatter(L1,L2,color="b")
+                end 
+            end 
+        end 
+    end 
+end 
+
+function plot_det_Mv_1_flip_vs_BCs(L1_max,L2_max,twist)
+    for L1 = 3:L1_max
+        for L2 = 3:L2_max
+            M0 = get_M0([L1,L2,twist])
+            Mv = flip_bond_variable(M0,[L1,L2,twist],[0,1],"z")
+            det_M = det(Mv)
+            sgn_det = sign(det_M)
+            if (svd(Mv).S)[end] >0.02
+                if sgn_det == 1
+                    scatter(L1,L2,color="r")
+                elseif sgn_det == -1
+                    scatter(L1,L2,color="b")
+                end 
+            end 
+        end 
+    end 
+end 
+
+function get_A0(L1)
+    A = zeros(L1,L1)
+    for j = 1:L1-1
+        A[j,j] = 1
+        A[j+1,j] = 1
+    end 
+    A[L1,L1] = 1
+    A[1,L1] = 1
+
+    return A 
+end 
+
+function plot_change_in_det_M_max_vs_BCs(L1_max,L2_max,twist)
+    for L1 = 3:L1_max
+        for L2 = 3:L2_max
+            M_max = get_M_for_max_seperated_visons_along_a2_boundary([L1,L2,twist])
+            M_hop = flip_bond_variable(M_max,[L1,L2,twist],[0,0],"z")
+            det_M = det(M_max)
+            det_M_hop = det(M_hop)
+            sgn_det = sign(det_M)*sign(det_M_hop)
+            if (svd(M_max).S)[end] >0.01
+                if sgn_det == 1
+                    scatter(L1,L2,color="r")
+                elseif sgn_det == -1
+                    scatter(L1,L2,color="b")
+                end 
+            end 
+        end 
+    end 
+end 
+
+# This section uses the variational ansatz for the ground state with a pair of visons
+function Delta_k(k)
+    Delta = 1 + exp(im*dot(k,a1)) + exp(im*dot(k,a2))
+
+    cos_phi = real(Delta)/abs(Delta)
+
+    return abs(Delta) , cos_phi
+end 
+function expection_value_of_V(BCs)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    V = 0 
+    for k in k_lattice 
+        D_k ,cos_phi_k = Delta_k(k)
+        V+=cos_phi_k
+    end 
+    return 2*V/(N)
+end 
+
+function self_consistent_equation(δ,BCs)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    Sum_term = 0 
+    for k in k_lattice
+        Δ_k = 1 + exp(im*dot(k,a1)) + exp(im*dot(k,a2))
+        for k_prime in k_lattice
+            Δ_k_prime = 1 + exp(im*dot(k_prime,a1)) + exp(im*dot(k_prime,a2))
+            Sum_term += (1-cos(angle(Δ_k)-angle(Δ_k_prime)))/(δ + 2*abs(Δ_k) + 2*abs(Δ_k_prime))
+        end 
+    end 
+    return -(4/(N^2))*Sum_term
+end 
+function get_Z_kk_0(BCs,δ)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    Z_kk = zeros(Complex{Float64},N,N)
+    for (k_id,k) in enumerate(k_lattice)
+        Δ_k = 1 + exp(im*dot(k,a1)) + exp(im*dot(k,a2))
+        for (k_prime_id,k_prime) in enumerate(k_lattice)
+            Δ_k_prime = 1 + exp(im*dot(k_prime,a1)) + exp(im*dot(k_prime,a2))
+            Z_kk[k_id,k_prime_id] = (real(Δ_k)/abs(Δ_k)-real(Δ_k_prime)/abs(Δ_k_prime)+ im*(imag(Δ_k)/abs(Δ_k)-imag(Δ_k_prime)/abs(Δ_k_prime)))/(δ + 2*abs(Δ_k) + 2*abs(Δ_k_prime))
+        end 
+    end 
+
+    return Z_kk/N
+end 
+
+function plot_Z_kk_in_BZ(BCs,δ,k_id)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+    Z_kk = get_Z_kk_0(BCs,δ)
+    k = k_lattice[k_id]
+    kx_points = zeros(N)
+    ky_points = zeros(N)
+    z_points = zeros(N)
+
+    for (k_prime_id,k_prime) in enumerate(k_lattice)
+        kx_points[k_prime_id] = k_prime[1]
+        ky_points[k_prime_id] = k_prime[2]
+        z_points[k_prime_id] = abs(Z_kk[k_id,k_prime_id])
+    end 
+
+    display(z_points)
+    scatter3D(kx_points,ky_points,z_points)
+end 
+
+function sum_of_Zkk_squared(δ,BCs)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    Sum_term = 0 
+    for k in k_lattice
+        D_k ,cos_phi_k = Delta_k(k)
+        for k_prime in k_lattice
+            D_k_prime , cos_phi_k_prime = Delta_k(k_prime)
+            Sum_term += ((cos_phi_k -cos_phi_k_prime)^2)/(delta + 2*D_k + 2*D_k_prime)^2
+        end 
+    end 
+    return Sum_term/N^2
+end 
+        
+function plot_self_consistent_eq(BCs)
+    Num_points = 100 
+    δ_points = LinRange(0,2,Num_points)
+    eq_points = zeros(Num_points)
+    for (id,δ) in enumerate(δ_points)
+        eq_points[id] = self_consistent_equation(δ,BCs)
+    end 
+    plot(δ_points,eq_points)
+    plot(δ_points,-δ_points)
+end 
+
+function find_Z_exact_for_vison_pair(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+    X0, Y0 = 0.5(U0+V0) , 0.5*(U0-V0)
+
+    Mv = flip_bond_variable(M0,BCs,[0,0],"z")
+    Uv ,Vv = get_U_and_V(Mv)
+    Xv, Yv = 0.5*(Uv+Vv) , 0.5*(Uv-Vv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+    X , Y = 0.5*(U+V) , 0.5*(U-V)
+
+    display(det(X))
+    Z = inv(X)*Y
+
+    return 0.5*(Z-Z')
+end 
+
+# sets default boundary conditions
+L1 = 10
+L2 = 10
+m = 0
+BCs = [L1,L2,m]
+
+# This section creates two commonly used matrices M0 and Mv
+M0 = get_M0(BCs)
+Mv = flip_bond_variable(M0,BCs,[0,0],"z") # vison pair at [0,0] with z orientation
+M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+display("")
