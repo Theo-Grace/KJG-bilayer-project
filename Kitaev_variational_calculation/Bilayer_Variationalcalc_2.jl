@@ -624,10 +624,12 @@ end
 
 function plot_low_energy_Majorana_distribution(M,BCs,excited_state_num=0)
     N = BCs[1]*BCs[2]
-    
+    L1 = BCs[1]
+    L2 = BCs[2]
+
     SVD_M = svd(M)
     U = SVD_M.U
-    V = (SVD_M.V)'
+    V = (SVD_M.V)
     E = SVD_M.S
 
     State_energy = E[N-excited_state_num]
@@ -662,14 +664,14 @@ function plot_low_energy_Majorana_distribution_repeated_cells(M,BCs,excited_stat
     
     SVD_M = svd(M)
     U = SVD_M.U
-    V = (SVD_M.V)'
+    V = (SVD_M.V)
     E = SVD_M.S
 
     State_energy = E[N-excited_state_num]
     display("Energy is $State_energy")
 
     cA_distribution = U[:,(N-excited_state_num)]
-    cB_distribution = V[(N-excited_state_num),:]
+    cB_distribution = V[:,(N-excited_state_num)]
 
     real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
     A_site_x_coords = [r[1] for r in real_lattice]
@@ -691,8 +693,8 @@ function plot_low_energy_Majorana_distribution_repeated_cells(M,BCs,excited_stat
     shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
 
     for shift_vec in shift_vectors
-        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2],color = cmap.((cA_distribution./maximum(cA_distribution)).+0.5),zorder=2)
-        #ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+rz[2].+shift_vec[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2)
+        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2],color = cmap.((cA_distribution./maximum(cA_distribution)).+0.5),zorder=2,s=1.9,linewidths=0)
+        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+rz[2].+shift_vec[2],color = cmap.((cB_distribution./maximum(cA_distribution)).+0.5),zorder=2,s=1.9,linewidths=0)
     end 
     ax2.scatter(0,0,alpha=0,zorder=4)
 end
@@ -993,7 +995,6 @@ function plot_pair_hopping_vs_system_size(N_max,twist,N_min=5)
     end 
 end 
 
-
 function calculate_parity_of_fluxless_ground_state(L1_max,L2_max,twist)
     for L1 = 3:L1_max
         for L2 = 3:L2_max
@@ -1140,6 +1141,7 @@ function self_consistent_equation(δ,BCs)
     end 
     return -(4/(N^2))*Sum_term
 end 
+
 function get_Z_kk_0(BCs,δ)
     N = BCs[1]*BCs[2]
     L1 = BCs[1]
@@ -1224,7 +1226,7 @@ function find_Z_exact_for_vison_pair(BCs)
     U0 ,V0 = get_U_and_V(M0)
     X0, Y0 = 0.5(U0+V0) , 0.5*(U0-V0)
 
-    Mv = flip_bond_variable(M0,BCs,[0,0],"z")
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
     Uv ,Vv = get_U_and_V(Mv)
     Xv, Yv = 0.5*(Uv+Vv) , 0.5*(Uv-Vv)
 
@@ -1238,14 +1240,966 @@ function find_Z_exact_for_vison_pair(BCs)
     return 0.5*(Z-Z')
 end 
 
+
+# This section plots changes to the ground state in position space 
+
+function plot_lowest_energy_pair_single_bond_flip(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+    X0, Y0 = 0.5(U0+V0) , 0.5*(U0-V0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    Uv ,Vv = get_U_and_V(Mv)
+    Xv, Yv = 0.5*(Uv+Vv) , 0.5*(Uv-Vv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+    X , Y = 0.5*(U+V) , 0.5*(U-V)
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == 1
+            U0[:,end] = -U0[:,end]
+            U = Uv'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,3)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[2],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[3],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[3],true)
+        axes[1].set_title("ζ1")
+        axes[2].set_title("ζR2")
+        axes[3].set_title("ζI2")
+        for i = 1:3    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        r1 = sqrt(2)*real.(Q[:,1])
+        ι1 = sqrt(2)*imag.(Q[:,1])
+        fig , axes =  subplots(1,2)
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[2],true)
+        axes[1].set_title("ζR1")
+        axes[2].set_title("ζI1")
+        for i = 1:2    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    end 
+end
+
+function plot_lowest_energy_states_two_bond_flips(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    M2v = flip_bond_variable(Mv,BCs,[9,7],"z")
+    U2v ,V2v = get_U_and_V(M2v)
+
+    U = U2v'*U0
+    V = V2v'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == -1
+            U0[:,end] = -U0[:,end]
+            U = U2v'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        r1 = sqrt(2)*real.(Q[:,1])
+        ι1 = sqrt(2)*imag.(Q[:,1])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("2 flipped link variables")
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[2],true)
+        axes[1].set_title("ζR1")
+        axes[2].set_title("ζI1")
+        for i = 1:2    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,1)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes,true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes,true)
+        axes.set_title("ζ1")
+        axes.set_xlim(-10,10)
+        axes.set_ylim(2.5,25)
+        axes.set_xticklabels([])
+        axes.set_yticklabels([])
+        fig.suptitle("2 flipped link variables")
+        figure()
+        plot((U*z1).^2)
+    end 
+end
+
+function plot_lowest_energy_states_three_bond_flips(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    M2v = flip_bond_variable(Mv,BCs,[9,7],"z")
+    M3v = flip_bond_variable(M2v,BCs,[10,6],"z")
+    U3v ,V3v = get_U_and_V(M3v)
+
+    U = U3v'*U0
+    V = V3v'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == -1
+            U0[:,end] = -U0[:,end]
+            U = U3v'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        r1 = sqrt(2)*real.(Q[:,1])
+        ι1 = sqrt(2)*imag.(Q[:,1])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("3 flipped link variables")
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[2],true)
+        axes[1].set_title("ζR1")
+        axes[2].set_title("ζI1")
+        for i = 1:2    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,1)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes,true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes,true)
+        axes.set_title("ζ1")
+        axes.set_xlim(-10,10)
+        axes.set_ylim(2.5,25)
+        axes.set_xticklabels([])
+        axes.set_yticklabels([])
+        fig.suptitle("3 flipped link variables")
+    end 
+end
+
+function plot_lowest_energy_states_four_bond_flips(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    M2v = flip_bond_variable(Mv,BCs,[9,7],"z")
+    M3v = flip_bond_variable(M2v,BCs,[10,6],"z")
+    M4v = flip_bond_variable(M3v,BCs,[11,5],"z")
+    U4v ,V4v = get_U_and_V(M4v)
+
+    #plot_bond_energies_2D_repeated_cell(M4v,BCs)
+
+    U = U4v'*U0
+    V = V4v'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == -1
+            U0[:,end] = -U0[:,end]
+            U = U4v'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        r1 = sqrt(2)*real.(Q[:,1])
+        ι1 = sqrt(2)*imag.(Q[:,1])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("4 flipped link variables")
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[2],true)
+        axes[1].set_title("ζR1")
+        axes[2].set_title("ζI1")
+        for i = 1:2    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,1)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes,true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes,true)
+        axes.set_title("ζ1")
+        axes.set_xlim(-10,10)
+        axes.set_ylim(2.5,25)
+        axes.set_xticklabels([])
+        axes.set_yticklabels([])
+        fig.suptitle("4 flipped link variables")
+    end 
+end
+
+function plot_lowest_energy_states_five_bond_flips(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    M2v = flip_bond_variable(Mv,BCs,[9,7],"z")
+    M3v = flip_bond_variable(M2v,BCs,[10,6],"z")
+    M4v = flip_bond_variable(M3v,BCs,[11,5],"z")
+    M5v = flip_bond_variable(M4v,BCs,[12,4],"z")
+    U5v ,V5v = get_U_and_V(M5v)
+
+    #plot_bond_energies_2D_repeated_cell(M5v,BCs)
+
+    U = U5v'*U0
+    V = V5v'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == 1
+            U0[:,end] = -U0[:,end]
+            U = U5v'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,3)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[2],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[3],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[3],true)
+        axes[1].set_title("ζ1")
+        axes[2].set_title("ζR2")
+        axes[3].set_title("ζI2")
+        for i = 1:3    
+            axes[i].set_xlim(-7,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+        fig.suptitle("5 flipped link variables")
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        z2 = real.(Q[:,2])
+        r3 = sqrt(2)*real.(Q[:,3])
+        ι3 = sqrt(2)*imag.(Q[:,3])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("5 flipped link variables")
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*z2,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*z2,"B",axes[2],true)
+        axes[1].set_title("ζ1")
+        axes[2].set_title("ζ2")
+        for i = 1:2    
+            axes[i].set_xlim(-7,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    end 
+end
+
+function plot_lowest_energy_states_six_bond_flips(BCs)
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[8,8],"z")
+    M2v = flip_bond_variable(Mv,BCs,[9,7],"z")
+    M3v = flip_bond_variable(M2v,BCs,[10,6],"z")
+    M4v = flip_bond_variable(M3v,BCs,[11,5],"z")
+    M5v = flip_bond_variable(M4v,BCs,[12,4],"z")
+    M6v = flip_bond_variable(M5v,BCs,[13,3],"z")
+    U6v ,V6v = get_U_and_V(M6v)
+
+    #plot_bond_energies_2D_repeated_cell(M6v,BCs)
+
+    U = U6v'*U0
+    V = V6v'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == 1
+            U0[:,end] = -U0[:,end]
+            U = U6v'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,3)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[2],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[3],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[3],true)
+        axes[1].set_title("ζ1")
+        axes[2].set_title("ζR2")
+        axes[3].set_title("ζI2")
+        for i = 1:3    
+            axes[i].set_xlim(-7,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+        fig.suptitle("6 flipped link variables")
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        z2 = real.(Q[:,2])
+        r3 = sqrt(2)*real.(Q[:,3])
+        ι3 = sqrt(2)*imag.(Q[:,3])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("5 flipped link variables")
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*z1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*z2,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*z2,"B",axes[2],true)
+        axes[1].set_title("ζ1")
+        axes[2].set_title("ζ2")
+        for i = 1:2    
+            axes[i].set_xlim(-7,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    end 
+end
+
+# This function is used to plot Majorana wavefunctions
+function plot_Majorana_distribution(BCs,c_distribution,sublattice="A", ax2 = gca(),repeat=false)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    #cmap = get_cmap("PuOr")
+    cmap = get_cmap("seismic")
+
+
+    #=
+    fig = gcf()
+    if size(fig.axes)[1] > 1
+        (fig.axes[2]).clear()
+        display("Clearing current Majorana distribution...")
+        ax1 = fig.axes[1]
+        ax2 = ax1.twinx()
+        y_min,y_max = ax1.get_ylim()
+        ax2.set_ylim([y_min,y_max])
+    else 
+        ax2 = gca()
+    end 
+    =#
+
+    shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
+    if repeat == false
+        shift_vectors = [[0,0]]
+    end 
+
+    if sublattice == "B"
+        site_shift = rz[2]
+    else
+        site_shift = 0
+    end 
+
+    for shift_vec in shift_vectors
+        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2].+site_shift,color = cmap.((c_distribution./maximum(c_distribution)).+0.5),s=5,zorder=2,linewidths=0)
+    end 
+end
+
+#This section includes functions to work out how the ground state of a sector with visons compares to the vison free ground state
+
+function plot_phases_of_F21_vison_pair(BCs)
+    M0 = get_M0(BCs)
+    U0,V0 = get_U_and_V(M0)
+    Mv = flip_bond_variable(M0,BCs,[5,5],"z")
+    Mv = flip_bond_variable(Mv,BCs,[6,4],"z")
+    Uv , Vv = get_U_and_V(Mv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+
+    F = U'*V
+
+    phases = eigvals(F)
+    display(angle.(phases))
+    
+
+    fig = gcf()
+    fig.set_size_inches(8,8)
+    plot_circle(1)
+    xlim(-1.1,1.1)
+    ylim(-1.1,1.1)
+    scatter(real.(phases),imag.(phases))
+
+    return F , eigvecs(F)[:,1]
+end 
+
+function plot_circle(radius)
+    N=100
+    angles = [2*pi*θ/N for θ =0:(N)]
+    x_points = radius*[cos(θ) for θ in angles]
+    y_points = radius*[sin(θ) for θ in angles]
+
+    plot(x_points,y_points)
+end 
+
+function plot_phases_of_F21_max_seperated(BCs)
+    M0 = get_M0(BCs)
+    U0,V0 = get_U_and_V(M0)
+    Mv = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+    Uv , Vv = get_U_and_V(Mv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+
+    F = U'*V
+
+    phases = eigvals(F)
+    display(angle.(phases))
+    
+
+    fig = gcf()
+    fig.set_size_inches(8,8)
+    plot_circle(1)
+    xlim(-1.1,1.1)
+    ylim(-1.1,1.1)
+    scatter(real.(phases),imag.(phases))
+
+
+    return F , eigvecs(F)[:,1]
+end 
+
+function plot_phases_of_F21_for_L_seperated_visons(BCs,L)
+    M0 = get_M0(BCs)
+    U0,V0 = get_U_and_V(M0)
+    Mv = get_M0(BCs)
+    for j = 0:(L-1)
+        Mv = flip_bond_variable(Mv,BCs,[L+j,L-j],"z")
+    end 
+
+    Uv , Vv = get_U_and_V(Mv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+
+    F = U'*V
+
+    phases = eigvals(F)
+    display(angle.(phases))
+    
+    fig = gcf()
+    fig.set_size_inches(8,8)
+    plot_circle(1)
+    xlim(-1.1,1.1)
+    ylim(-1.1,1.1)
+    scatter(real.(phases),imag.(phases))
+
+    return F , eigvecs(F)[:,1]
+end 
+
+function plot_real_part_of_F21_for_L_seperated_visons_Vs_BCs(L_max,L_sep)
+    """
+    This calculates and plots real parts of eigenvalues of F21 for visons seperated by L_sep parallel "z" bond flips
+    For lattice sizes with lengths multiples of 3 the determinant det(F21) is fixed to be the opposite sign as for other lattice sizes where it has a well defined value. 
+    """
+    L_min = 2*L_sep+1
+    if L_min%3 != 0 
+        BCs = [L_min,L_min,0]
+    else
+        BCs = [L_min+1,L_min+1,0]
+    end 
+    M0 = get_M0(BCs)
+    U0,V0 = get_U_and_V(M0)
+    Mv = get_M0(BCs)
+    for j = 0:(L_sep-1)
+            Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+    end 
+
+    Uv , Vv = get_U_and_V(Mv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+
+    F = U'*V
+    det_F = Int(round(det(F)))
+
+    for L = L_min:L_max
+        BCs = [L,L,0]
+        M0 = get_M0(BCs)
+        U0,V0 = get_U_and_V(M0)
+        Mv = get_M0(BCs)
+        for j = 0:(L_sep-1)
+            Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+        end 
+
+        Uv , Vv = get_U_and_V(Mv)
+
+        U = Uv'*U0
+        V = Vv'*V0
+
+        F = U'*V
+
+        if L%3 == 0 && Int(round(det(F))) != -(det_F)
+            U0[:,end] = -U0[:,end]
+            U = Uv'*U0
+            F = U'*V
+        end 
+
+        cos_θ = real.(eigvals(F))[1:10]
+        display(cos_θ)
+        scatter(L*ones(10),cos_θ,color="b")
+        sleep(0.01)
+    end 
+end 
+
+function plot_states_in_GS_for_L_seperated_visons(BCs,L_sep)
+   
+    M0 = get_M0(BCs)
+    U0,V0 = get_U_and_V(M0)
+    Mv = get_M0(BCs)
+    for j = 0:(L_sep-1)
+        Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+    end 
+
+    Uv , Vv = get_U_and_V(Mv)
+
+    U = Uv'*U0
+    V = Vv'*V0
+
+    F21 = U'*V
+    nu = Int(floor((L_sep+1)/3))
+    det_F = nu%2
+
+ 
+    if BCs[1]%3 == 0 && Int(round(det(F21))) != -(det_F)
+        U0[:,end] = -U0[:,end]
+        U = Uv'*U0
+        F21 = U'*V
+    end 
+
+    Q = eigvecs(F21)
+    fig , axes =  subplots(1,nu)
+    
+    for i = 1:nu
+        z = real.(Q[:,i])
+        cA_distribution = U0*z
+        cB_distribution = V0*z
+        if nu > 1
+            axes[i].set_xlim(-10,10+L_sep)
+            axes[i].set_ylim(L_sep,BCs[1]+L_sep)
+            plot_Majorana_distribution(BCs,cA_distribution,"A",axes[i],true)
+            plot_Majorana_distribution(BCs,cB_distribution,"B",axes[i],true)
+            axes[i].set_title("ζ_$i")
+        else
+            plot_Majorana_distribution(BCs,cA_distribution,"A",axes,true)
+            plot_Majorana_distribution(BCs,cB_distribution,"B",axes,true)
+            title("ζ_1")
+        end 
+    end 
+end 
+
+# flipping bonds on the same site 
+
+function plot_real_part_of_F21_for_2_flipped_bonds_same_site_Vs_BCs(L_max)
+
+    for L = 5:L_max
+        BCs = [L,L,0]
+        M0 = get_M0(BCs)
+        U0,V0 = get_U_and_V(M0)
+        Mv = flip_bond_variable(M0,BCs,[2,2],"x")
+        Mv = flip_bond_variable(Mv,BCs,[2,2],"y")
+        Mv = flip_bond_variable(Mv,BCs,[2,2],"z")
+
+        Uv , Vv = get_U_and_V(Mv)
+
+        U = Uv'*U0
+        V = Vv'*V0
+
+        F = U'*V
+       
+        if L%3 == 0 && Int(round(det(F))) == -1
+            U0[:,end] = -U0[:,end]
+            U = Uv'*U0
+            F = U'*V
+            cos_θ = real.(eigvals(F))[1:10]
+            display(cos_θ)
+            scatter(L*ones(10),cos_θ,color="r")
+            sleep(0.01)
+        else
+            cos_θ = real.(eigvals(F))[1:10]
+            display(cos_θ)
+            scatter(L*ones(10),cos_θ,color="b")
+            sleep(0.01)
+        end 
+    end 
+    title("2 flipped bonds on same site")
+    xlabel("system size L")
+    ylabel("cos(θ)")
+end 
+
+function plot_S_same_site_bond_flips(BCs)
+    """
+    Plots the changes to the ground state due to flipping 3 bonds at the same site (enacting a gauge transformation)
+    """
+    N = BCs[1]*BCs[2]
+    M0 = get_M0(BCs)
+    U0 ,V0 = get_U_and_V(M0)
+
+    Mv = flip_bond_variable(M0,BCs,[0,0],"x")
+    Mv = flip_bond_variable(Mv,BCs,[0,0],"y")
+    Mv = flip_bond_variable(Mv,BCs,[0,0],"z")
+    #plot_bond_energies_2D_repeated_cell(Mv,BCs)
+
+    G = Int.(Matrix(I,N,N))
+    G[1,1] = -1 
+    U3 = G*U0
+    V3 = V0
+
+    #Uv ,Vv = get_U_and_V(Mv)
+
+    U = U3'*U0
+    V = V3'*V0
+
+    F21 = U'*V
+
+    if BCs[1]%3 == 0 && BCs[2]%3 == 0 
+        if Int(round(det(F21))) == -1
+            U0[:,end] = -U0[:,end]
+            U = Uv'*U0
+            F21 = U'*V
+        end 
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        r1 = sqrt(2)*real.(Q[:,1])
+        ι1 = sqrt(2)*imag.(Q[:,1])
+        fig , axes =  subplots(1,2)
+        fig.suptitle("3 flipped links on the same site")
+        plot_Majorana_distribution(BCs,U0*r1,"A",axes[1],true)
+        plot_Majorana_distribution(BCs,V0*r1,"B",axes[1],true)
+        plot_Majorana_distribution(BCs,U0*ι1,"A",axes[2],true)
+        plot_Majorana_distribution(BCs,V0*ι1,"B",axes[2],true)
+        axes[1].set_title("ζR1")
+        axes[2].set_title("ζI1")
+        for i = 1:2    
+            axes[i].set_xlim(-10,10)
+            axes[i].set_ylim(2.5,25)
+            axes[i].set_xticklabels([])
+            axes[i].set_yticklabels([])
+        end 
+    else
+        display(eigvals(F21)[1:5])
+        Q = eigvecs(F21)
+        z1 = real.(Q[:,1])
+        r1 = sqrt(2)*real.(Q[:,2])
+        ι1 = sqrt(2)*imag.(Q[:,2])
+        fig , axes =  subplots(1,1)
+        plot_Majorana_distribution(BCs,U0*z1,"A",axes,true)
+        #plot_Majorana_distribution(BCs,V0*z1,"B",axes,true)
+        axes.set_title("ζ1")
+        axes.set_xlim(-10,10)
+        axes.set_ylim(2.5,25)
+        axes.set_xticklabels([])
+        axes.set_yticklabels([])
+        fig.suptitle("3 flipped link variables on the same site")
+        
+    end 
+end
+
+# plotting energy density 
+
+function plot_energy_density_from_M_bar(M,BCs,repeat=true)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+    N = L1*L2
+
+    U ,V = get_U_and_V(M)
+    F=U*V'
+    M_bar = M*F'
+
+    energy_density = [(1-M_bar[i,i]/1.5747386) for i=1:N]
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    #cmap = get_cmap("PuOr")
+    cmap = get_cmap("seismic")
+
+    shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
+    if repeat == false
+        shift_vectors = [[0,0]]
+    end 
+    display(((energy_density)).+0.5)
+
+    for shift_vec in shift_vectors
+        scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2],color = cmap.((((energy_density)).*5).+0.5),zorder=2,linewidths=0)
+    end 
+end 
+
+function plot_f_hopping_from_M_bar(M,BCs,site,repeat=true)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+    N = L1*L2
+
+    U ,V = get_U_and_V(M)
+    F=U*V'
+    M_bar = M*F'
+
+    site_index , _ = convert_bond_to_site_indicies(BCs,site,"z")
+
+    f_hopping = [abs.(M_bar[site_index,i]) for i=1:N]
+
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+    A_site_x_coords = [r[1] for r in real_lattice]
+    A_site_y_coords = [r[2] for r in real_lattice]
+
+    #cmap = get_cmap("PuOr")
+    cmap = get_cmap("Greens")
+
+    shift_vectors = [-L2*a2-m*a1-L1*a1,-L2*a2-m*a1,-L2*a2-m*a1+L1*a1,-L1*a1,[0,0],L1*a1,L2*a2+m*a1-L1*a1,L2*a2+m*a1,L2*a2+m*a1+L1*a1]
+    if repeat == false
+        shift_vectors = [[0,0]]
+    end 
+
+    for shift_vec in shift_vectors
+        scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2],color = cmap.(1*f_hopping),zorder=2,linewidths=0)
+    end 
+end 
+
+function plot_f_nn_hopping_2D(M,BCs)
+
+    U,V = get_U_and_V(M)
+    F = U*V'
+    M_bar = M*F'
+
+    A_sites = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    a1_links = [(r,r+a1) for r in A_sites]
+    a2_links = [(r,r+a2) for r in A_sites]
+    a1_a2_links = [(r,r+a1-a2) for r in A_sites]
+
+    #x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
+
+    link_energy_of_fluxless_system = 0.5250914141631111
+
+    a1_link_hopping = [M_bar[convert_n1_n2_to_site_index([n1,n2],BCs),convert_n1_n2_to_site_index([n1+1,n2],BCs)] for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+    a2_link_hopping = [M_bar[convert_n1_n2_to_site_index([n1,n2],BCs),convert_n1_n2_to_site_index([n1,n2+1],BCs)] for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+    a1_a2_link_hopping = [M_bar[convert_n1_n2_to_site_index([n1,n2],BCs),convert_n1_n2_to_site_index([n1+1,n2-1],BCs)] for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    cmap = get_cmap("seismic") # Should choose a diverging colour map so that 0.5 maps to white 
+
+    display(a1_link_hopping)
+    a1colors = cmap.((a1_link_hopping).+0.5)
+    a2colors = cmap.(a2_link_hopping.+0.5)
+    a1_a2colors = cmap.(a1_a2_link_hopping.+0.5)
+
+    a1linecollection = matplotlib.collections.LineCollection(a1_links,colors = a1colors,linewidths=2.5)
+    a2linecollection = matplotlib.collections.LineCollection(a2_links,colors = a2colors,linewidths=2.5)
+    a1_a2linecollection = matplotlib.collections.LineCollection(a1_a2_links,colors = a1_a2colors,linewidths=2.5)
+
+    fig ,ax = subplots()
+    ax.add_collection(a1linecollection)
+    ax.add_collection(a2linecollection)
+    ax.add_collection(a1_a2linecollection)
+    ax.autoscale()
+
+end 
+
+# Adds functions for the extended Kitaev model
+
+
 # sets default boundary conditions
-L1 = 10
-L2 = 10
+L1 = 28
+L2 = 28
 m = 0
 BCs = [L1,L2,m]
+N=L1*L2
 
 # This section creates two commonly used matrices M0 and Mv
 M0 = get_M0(BCs)
-Mv = flip_bond_variable(M0,BCs,[0,0],"z") # vison pair at [0,0] with z orientation
+Mv = flip_bond_variable(M0,BCs,[0,0],"z")
+#M2v = flip_bond_variable(Mv, BCs,[8,8],"y")
+#M3v = flip_bond_variable(M2v, BCs,[6,2],"z")
+#M4v = flip_bond_variable(M3v, BCs,[7,1],"z")
+#M3 = flip_bond_variable(Mv,BCs,[0,0],"y")
+#M3 = flip_bond_variable(M3,BCs,[0,0],"z")
+
+#Mv = flip_bond_variable(M0,BCs,[0,0],"z") # vison pair at [0,0] with z orientation
 M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
 display("")
+
+U0, V0 = get_U_and_V(M0)
+F0 = U0*V0'
+
+M0_bar = M0*F0'
+
+Uv ,Vv = get_U_and_V(Mv)
+Fv = Uv*Vv'
+
+F = (U0'*Uv)*(V0'*Vv)'
+
+Q = eigvecs(F)
+z = V0*Q[:,1]
+z = z*exp(-im*angle(z[1]))
+a = sqrt(2)real.(z)
+b = sqrt(2)imag.(z)
+
+O = -0.969
+phi = -angle((F0*z)[1])
+
+
+q = V0'*z
+
+
+
+Λ1 = -2*(1-cos(O))*(z'*M0'*F0*z-2*real(z[1]*(F0*z)[1])) +4*sin(O)*imag(z[1]*(F0*z)[1])
+display(Λ1)
+Λ2 = (1-cos(O))*(transpose(z)*M0'*F0*z-2*z[1]*(F0*z)[1]) 
+display(Λ2)
+Eq = -2*im*sin(O)*(-z[1]*(F0)[1,:])+2*(1-cos(O))*((M0'*F0)*z-z[1]*(F0)[1,:])+Λ1*z-2*Λ2*conj.(z)
+
+
+Λ = (cos(O)-1)*(2*b'*M0'*F0*a-2(b[1]*(F0*a)[1]+a[1]*(F0*b)[1]))
+Λa = 0.5*(cos(O)-1)*(2*a'*M0'*F0*a-4*a[1]*(F0*a)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
+Λb = 0.5*(cos(O)-1)*(2*b'*M0'*F0*b-4*b[1]*(F0*b)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
+display(Λa)
+display(Λb)
+display(Λa+Λb)
+display(Λ)
+
+Eqa = (1-cos(O))*(2*M0'*F0*a-2*a[1]*F0[1,:]) + 2*sin(O)*(b[1]*F0[1,:]) + Λ*b + 2*Λa*a
+Eqb = (1-cos(O))*(2*M0'*F0*b-2*b[1]*F0[1,:]) - 2*sin(O)*(a[1]*F0[1,:]) + Λ*a + 2*Λb*b 
+
+function vary_z_phase(z0)
+    for θ in LinRange(0,pi,100)
+        z = z0*exp(im*θ)
+        a = sqrt(2)real.(z)
+        b = sqrt(2)imag.(z)
+        Λ = (cos(O)-1)*(2*b'*M0'*F0*a-2(b[1]*(F0*a)[1]+a[1]*(F0*b)[1]))
+        Λa = 0.5*(cos(O)-1)*(2*a'*M0'*F0*a-4*a[1]*(F0*a)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
+        Λb = 0.5*(cos(O)-1)*(2*b'*M0'*F0*b-4*b[1]*(F0*b)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
+
+        scatter(θ,Λ,color="b")
+        scatter(θ,Λa,color="r")
+        scatter(θ,Λb,color="g")
+        scatter(θ,Λa+Λb,color="black")
+        scatter(θ,(F0*a)[1],color="purple")
+    end 
+end 
+
+
+#=
+display(2*Fv[1,1]-2*F0[1,1]) # exact <2|V|2> - <1|V|1>
+display(-2sin(O)*(a[1]*(F0*b)[1]-b[1]*(F0*a)[1])-4*sin(O/2)^2*(a[1]*(F0*a)[1]+b[1]*(F0*b)[1])) # estimate <2|V|2> - <1|V|1>
+display(-2*im*sin(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])-2*(1-cos(O))*(z[1]*(F0*conj(z))[1]+conj(z)[1]*(F0*z)[1]))
+
+display(tr(M0*(F0'-Fv'))) #exact {0^2}H^1{0^2}
+display(2*sin(O/2)^2*(b'*(M0'*F0)*b+a'*(M0'*F0)*a)) #estimate in terms of a and b 
+display(4*sin(O/2)^2*z'*(M0'*F0)*z) # variational estimate in terms of complex z
+=#
+
+
+E2 = -2*im*sin(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])+2*(1-cos(O))*(z'*(M0'*F0)*z-z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])
+
+dE2_dO = -2*im*cos(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])+2*(sin(O))*(z'*(M0'*F0)*z-z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])
+
+#Eq = -2*im*sin(O)*(-conj(z)[1]*(F0)[1,:])+2*(1-cos(O))*((M0'*F0)*conj(z)-conj(z)[1]*(F0)[1,:])
+
+
+#display(-atan(2*z[1]^2*sin(phi)/(z'*(M0'*F0)*z-2*z[1]^2*cos(phi))))
+#=
+for θ in LinRange(0,2*pi,15)
+    z_prime = z*exp(-im*θ)
+    b_prime = sqrt(2)imag.(z_prime)
+    plot_Majorana_distribution(BCs,b_prime,"B",gca(),true)
+    sleep(0.01)
+end 
+=#
+
+function Fix_Lambda(Λ,BCs)
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    Sum_term = 0 
+    cos_term = 0
+    for k in k_lattice
+        D_k ,cos_phi_k = Delta_k(k)
+        cos_term += (cos_phi_k)/(Λ + 4*sin(O/2)^2*D_k)
+        Sum_term += 1/(Λ + 4*sin(O/2)^2*2*D_k)
+    end 
+    return (1/N)*Sum_term
+end 
+
+#=
+for Λ in LinRange(0,1000,200)
+    func = Fix_Lambda(Λ,BCs)
+    scatter(Λ,func)
+end
+=#
+
+#(2*(exp(-im*O)-im)*z[1]*F[1,:] + 2(cos(O)-1)*(M0'*F0*z))./z
