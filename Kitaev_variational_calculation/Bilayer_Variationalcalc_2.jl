@@ -6,9 +6,13 @@
 
 using LinearAlgebra
 using SparseArrays
-using Arpack 
+#using Arpack 
 using PyPlot
 using SkewLinearAlgebra
+using Optimization 
+using OptimizationOptimJL
+using ForwardDiff
+
 pygui(true) 
 
 # sets the real space lattice vectors
@@ -106,6 +110,71 @@ function get_M0(BCs)
     M[1:L1,(L1*(L2-1)+1):N] = B_prime
     return M 
 end 
+
+function get_M0_open_BCs(BCs)
+    """
+    Calculates a L1L2 x L1L2 matrix M which is part of the Hamiltonian for a flux free Kitaev model in terms of Majorana fermions 
+
+    uses the lattice vectors 
+    a1 = [1/2, sqrt(3)/2]
+    a2 = [-1/2, sqrt(3)/2]
+
+    and numbering convention i = 1 + n1 + N*n2 to represent a site [n1,n2] = n1*a1 + n2*a2 
+    """
+    L1 = BCs[1]
+    L2 = BCs[2]
+    M = BCs[3]
+
+    N = L1*L2
+    A = zeros(L1,L1)
+    B = zeros(L1,L1)
+    for j = 1:L1-1
+        A[j,j] = 1
+        A[j+1,j] = 1
+        B[j,j] = 1
+    end 
+    A[L1,L1] = 1
+    B[L1,L1] = 1
+    M = zeros(N,N)
+    for j = 1:(L2-1)
+        M[(1+(j-1)*L1):(j*L1),(1+(j-1)*L1):(j*L1)] = A
+        M[(1+j*L1):((j+1)*L1),(1+(j-1)*L1):(j*L1)] = B
+    end
+
+    M[L1*(L2-1)+1:N,L1*(L2-1)+1:N] = A
+    M[1,1]=0
+    return M 
+end 
+
+function get_M_open_single_vison(bcs,chain_length=Int(floor(bcs[1]/2)),chain_n2 = Int(floor(bcs[2]/2)))
+    L1 = bcs[1]
+    L2 = bcs[2]
+
+    N = L1*L2
+    A = zeros(L1,L1)
+    for j = 1:L1-1
+        A[j,j] = 1
+        A[j+1,j] = 1
+    end 
+    A[L1,L1] = 1
+    M = zeros(N,N)
+    for j = 1:(L2-1)
+        M[(1+(j-1)*L1):(j*L1),(1+(j-1)*L1):(j*L1)] = A
+        M[(1+j*L1):((j+1)*L1),(1+(j-1)*L1):(j*L1)] = Int.(I(L1))
+    end
+
+    #chain_length = Int(floor(L1/2))
+    #chain_n2 = Int(floor(L2/2))
+
+    M[L1*(L2-1)+1:N,L1*(L2-1)+1:N] = A
+    M[1,1]=0
+
+    cs = 1+chain_n2*L1 # chain start index
+    ce = cs + chain_length -1 # chain end index
+    M[(cs):(ce),(cs-L1):(cs-L1+chain_length-1)] = -Int.(I(chain_length))
+    return M 
+end 
+
 
 function flip_bond_variable(M,BCs,bond_site,bond_flavour)
     """
@@ -247,6 +316,27 @@ function get_M_for_max_seperated_visons_along_a2_boundary(BCs)
 
     return M 
 end 
+
+function get_M_for_L_seperated_visons_along_a1_boundary(BCs,L_sep)
+    M = get_M0(BCs) 
+
+    L1 = BCs[1]
+    L2 = BCs[2]
+
+    B_flip = Int.(Matrix(I,L1,L1))
+    B_flip[1:L_sep,1:L_sep] = -Int.(Matrix(I,L_sep,L_sep))
+
+    M[(L1+1):2*L1,1:L1] = B_flip
+    return M 
+end 
+
+function flip_loop_across_a1_boundary(BCs)
+    L1 = BCs[1]
+    M = get_M0(BCs)
+    M[(L1+1):2*L1,1:L1] = -Int.(Matrix(I,L1,L1))
+
+    return M
+end
 
 function flip_bond_on_one_layer(M,BCs,bond_site,bond_flavour)
     L1 = BCs[1]
@@ -519,6 +609,21 @@ function get_link_indices(BCs)
     return x_link_indices, y_link_indices, z_link_indices
 end 
 
+function get_link_indices_open_BCs(BCs)
+    N = BCs[1]*BCs[2]
+    A_sites_x = [[n1,n2] for n2=1:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+    A_sites_y = [[n1,n2] for n2=0:(BCs[2]-1) for n1 = 1:(BCs[1]-1)]
+
+    x_linked_B_sites = [r+nx-nz for r in A_sites_x]
+    y_linked_B_sites = [r+ny-nz for r in A_sites_y]
+
+    x_link_indices = [[j,convert_n1_n2_to_site_index(x_linked_B_sites[j],BCs)] for j = 1:(N-BCs[1])]
+    y_link_indices = [[j,convert_n1_n2_to_site_index(y_linked_B_sites[j],BCs)] for j = 1:(N-BCs[2])]
+    z_link_indices = [[j,j] for j=1:N]
+
+    return x_link_indices, y_link_indices, z_link_indices
+end 
+
 function calculate_F(M)
     U,V = get_U_and_V(M)
     F = U*V'
@@ -573,6 +678,47 @@ function plot_bond_energies_2D(M,BCs)
 
 end 
 
+function plot_bond_energies_2D_open_BCs(M,BCs)
+
+    F = calculate_F(M)
+
+    A_sites = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+    A_sites_y = [n1*a1+n2*a2 for n2=0:(BCs[2]-1) for n1 = 1:(BCs[1]-1)]
+    A_sites_x = [n1*a1+n2*a2 for n2=1:(BCs[2]-1) for n1 = 0:(BCs[1]-1)]
+
+    z_links = [(r,r+rz) for r in A_sites]
+    x_links = [(r,r+rx) for r in A_sites]
+    y_links = [(r,r+ry) for r in A_sites]
+
+    x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
+
+    link_energy_of_fluxless_system = 0.5250914141631111
+
+    x_link_energies = calculate_link_energies(F,M,x_link_indices) .- link_energy_of_fluxless_system
+    y_link_energies = calculate_link_energies(F,M,y_link_indices) .- link_energy_of_fluxless_system
+    z_link_energies = calculate_link_energies(F,M,z_link_indices) .- link_energy_of_fluxless_system
+
+    cmap = get_cmap("seismic") # Should choose a diverging colour map so that 0.5 maps to white 
+
+    max_energy = maximum(maximum.([abs.(z_link_energies)[2:end]]))
+    display(max_energy)
+
+    xcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in x_link_energies]
+    ycolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in y_link_energies[(L1+1):end]]
+    zcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in z_link_energies]
+
+    zlinecollection = matplotlib.collections.LineCollection(z_links,colors = zcolors,linewidths=2.5)
+    xlinecollection = matplotlib.collections.LineCollection(x_links,colors = xcolors,linewidths=2.5)
+    ylinecollection = matplotlib.collections.LineCollection(y_links[(L1+1):end],colors = ycolors,linewidths=2.5)
+
+    fig ,ax = subplots()
+    ax.add_collection(zlinecollection)
+    ax.add_collection(xlinecollection)
+    ax.add_collection(ylinecollection)
+    ax.autoscale()
+
+end 
+
 function plot_bond_energies_2D_repeated_cell(M,BCs)
     L1 = BCs[1]
     L2 = BCs[2]
@@ -591,6 +737,7 @@ function plot_bond_energies_2D_repeated_cell(M,BCs)
     x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
 
     link_energy_of_fluxless_system = 0.5250914141631111
+    #link_energy_of_fluxless_system = 1
 
     x_link_energies = calculate_link_energies(F,M,x_link_indices) .- link_energy_of_fluxless_system
     y_link_energies = calculate_link_energies(F,M,y_link_indices) .- link_energy_of_fluxless_system
@@ -605,15 +752,15 @@ function plot_bond_energies_2D_repeated_cell(M,BCs)
     ycolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in y_link_energies]
     zcolors = [cmap((energy+max_energy)/(2*max_energy)) for energy in z_link_energies]
 
-    fig ,ax = subplots()
+    ax=gca()
     for shift_vector in shift_vectors
         z_links = [(r+shift_vector,r+rz+shift_vector) for r in A_sites]
         x_links = [(r+shift_vector,r+rx+shift_vector) for r in A_sites]
         y_links = [(r+shift_vector,r+ry+shift_vector) for r in A_sites]
         
-        zlinecollection = matplotlib.collections.LineCollection(z_links,colors = zcolors,linewidths=2.5)
-        xlinecollection = matplotlib.collections.LineCollection(x_links,colors = xcolors,linewidths=2.5)
-        ylinecollection = matplotlib.collections.LineCollection(y_links,colors = ycolors,linewidths=2.5)
+        zlinecollection = matplotlib.collections.LineCollection(z_links,colors = zcolors,linewidths=1.5)
+        xlinecollection = matplotlib.collections.LineCollection(x_links,colors = xcolors,linewidths=1.5)
+        ylinecollection = matplotlib.collections.LineCollection(y_links,colors = ycolors,linewidths=1.5)
 
         ax.add_collection(zlinecollection)
         ax.add_collection(xlinecollection)
@@ -1659,7 +1806,7 @@ function plot_Majorana_distribution(BCs,c_distribution,sublattice="A", ax2 = gca
     end 
 
     for shift_vec in shift_vectors
-        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2].+site_shift,color = cmap.((c_distribution./maximum(c_distribution)).+0.5),s=5,zorder=2,linewidths=0)
+        ax2.scatter(A_site_x_coords.+shift_vec[1],A_site_y_coords.+shift_vec[2].+site_shift,color = cmap.((c_distribution./maximum(c_distribution)).+0.5),s=15,zorder=2)
     end 
 end
 
@@ -1853,6 +2000,157 @@ function plot_states_in_GS_for_L_seperated_visons(BCs,L_sep)
             title("ζ_1")
         end 
     end 
+end 
+
+# Plots changes in GS vs vison seperation 
+
+function plot_changes_in_GS_for_L_seperated_visons(BCs,L_sep)
+   
+    Mv = get_M0(BCs)
+    for j = 0:(L_sep-1)
+        Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+    end 
+
+    M_hopped = flip_bond_variable(Mv,BCs,[L_sep,L_sep],"z")
+
+    U1 , V1 = get_U_and_V(Mv)
+    U2 , V2 = get_U_and_V(M_hopped)
+
+    U = U2'*U1
+    V = V2'*V1
+
+    F21 = U'*V
+
+    #=
+    nu = Int(floor((L_sep+1)/3))
+    det_F = nu%2
+
+ 
+    if BCs[1]%3 == 0 && Int(round(det(F21))) != -(det_F)
+        U0[:,end] = -U0[:,end]
+        U = Uv'*U0
+        F21 = U'*V
+    end 
+    =#
+
+    nu = 1 
+
+    Q = eigvecs(F21)
+    display(eigvals(F21))
+    fig , axes =  subplots(1,nu)
+    
+    for i = 1:nu
+        z = imag.(Q[:,i])
+        cA_distribution = U1*z
+        cB_distribution = V1*z
+        if nu > 1
+            axes[i].set_xlim(-10,10+L_sep)
+            axes[i].set_ylim(L_sep,BCs[1]+L_sep)
+            plot_Majorana_distribution(BCs,cA_distribution,"A",axes[i],true)
+            plot_Majorana_distribution(BCs,cB_distribution,"B",axes[i],true)
+            axes[i].set_title("ζ_$i")
+        else
+            plot_Majorana_distribution(BCs,cA_distribution,"A",axes,true)
+            plot_Majorana_distribution(BCs,cB_distribution,"B",axes,true)
+            title("ζ_1")
+        end 
+    end 
+    return F21
+end
+
+function plot_phases_of_F21_for_GS_changes_L_seperated_visons(BCs,L)
+   
+    Mv = get_M0(BCs)
+    for j = 0:(L-1)
+        Mv = flip_bond_variable(Mv,BCs,[L+j,L-j],"z")
+    end 
+
+    M_hop = flip_bond_variable(Mv,BCs,[L,L],"z")
+
+    U1 , V1 = get_U_and_V(Mv)
+    U2 ,V2 = get_U_and_V(M_hop)
+
+    U = U2'*U1
+    V = V2'*V1
+
+    F = U'*V
+
+    phases = eigvals(F)
+    display(angle.(phases))
+    
+    fig = gcf()
+    fig.set_size_inches(8,8)
+    plot_circle(1)
+    xlim(-1.1,1.1)
+    ylim(-1.1,1.1)
+    scatter(real.(phases),imag.(phases))
+
+    return F , eigvecs(F)[:,1]
+end 
+
+function plot_real_part_of_F21_for_GS_changes_L_seperated_visons_Vs_BCs(L_max,L_sep,m=0)
+    """
+    This calculates and plots real parts of eigenvalues of F21 for visons seperated by L_sep parallel "z" bond flips
+    F21 describes changes between the GS with visons at seperation L_sep and L_sep+1 
+    For lattice sizes with lengths multiples of 3 the determinant det(F21) is fixed to be the opposite sign as for other lattice sizes where it has a well defined value. 
+    """
+    
+    L_min = 2*L_sep+1
+    if L_min%3 != 0 
+        BCs = [L_min,L_min,m]
+    else
+        BCs = [L_min+1,L_min+1,m]
+    end 
+    
+    Mv = get_M0(BCs)
+    for j = 0:(L_sep-1)
+        Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+    end 
+    M_hop = flip_bond_variable(Mv,BCs,[L_sep,L_sep],"z")
+
+    U1 , V1 = get_U_and_V(Mv)
+    U2 , V2 = get_U_and_V(M_hop)
+
+    U = U2'*U1
+    V = V2'*V1
+
+    F = U'*V
+    det_F = Int(round(det(F)))
+
+    for L = L_min:L_max
+        BCs = [L,L,m]
+        
+        Mv = get_M0(BCs)
+        for j = 0:(L_sep-1)
+            Mv = flip_bond_variable(Mv,BCs,[L_sep+j,L_sep-j],"z")
+        end 
+        M_hop = flip_bond_variable(Mv,BCs,[L_sep,L_sep],"z")
+
+        U1 , V1 = get_U_and_V(Mv)
+        U2 , V2 = get_U_and_V(M_hop)
+
+        U = U2'*U1
+        V = V2'*V1
+    
+
+        F = U'*V
+
+        #=
+        if L%3 == 0 && Int(round(det(F))) != -(det_F)
+            U0[:,end] = -U0[:,end]
+            U = Uv'*U0
+            F = U'*V
+        end 
+        =#
+
+        cos_θ = real.(eigvals(F))[1:10]
+        display(cos_θ)
+        scatter(L*ones(10),cos_θ,color="b")
+        sleep(0.01)
+    end 
+    title("real part of eigenvalues of F21 for vison seperation $L_sep, m=$m")
+    ylabel("cos(θ)")
+    xlabel("L")
 end 
 
 # flipping bonds on the same site 
@@ -2067,35 +2365,592 @@ end
 # Adds functions for the extended Kitaev model
 
 
+function plot_F21_eigenvalues_vs_vison_seperation(BCs)
+    L1 = BCs[1]
+    for L_sep = 1:(L1)
+        M_max = get_M_for_L_seperated_visons_along_a1_boundary(BCs,L_sep)
+        M_hop = flip_bond_variable(M_max,BCs,[0,1],"y")
+
+        U1 , V1 = get_U_and_V(M_max) 
+        U2 , V2 = get_U_and_V(M_hop)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:10]
+        display(cos_O)
+        scatter(L_sep*ones(1,10),cos_O,color="r")
+        sleep(0.01)
+    end 
+end 
+
+function plot_F21_eigenvalues_fixed_vison_seperation_vs_BCs(L_sep,L_max)
+    b_F21 = zeros(Int(ceil((L_max-L_sep)/3))+1,8)
+    b_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    b_id=1
+
+    g_F21 = zeros(Int(ceil((L_max-L_sep)/3))+1,8)
+    g_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    g_id=1
+
+    r_F21 = zeros(Int(ceil((L_max-L_sep)/3))+1,8)
+    r_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    r_id=1
+    for L = (L_sep+5):L_max
+        xlabel("1/L")
+        ylabel("cos_O")
+        title("F21 (compared to fluxless) eigenvalues for visons separated by [$L_sep,-3]")
+        #=
+        M1 = get_M_for_L_seperated_visons_along_a1_boundary([L,L,m],L_sep-1)
+        M1 = flip_bond_variable(M1,[L,L,m],[0,1],"x")
+        =#
+        M1 = get_M0([L,L,m])
+        M2 = get_M_for_L_seperated_visons_along_a1_boundary([L,L,m],L_sep)
+        
+        #M2 = flip_bond_variable(M2,[L,L,m],[0,1],"x")
+        #M2 = flip_bond_variable(M2,[L,L,m],[0,2],"x")
+        #M2 = flip_bond_variable(M2,[L,L,m],[0,3],"x")
+        #M2 = flip_bond_variable(M2,[L,L,m],[0,4],"x")
+        
+        
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:8]
+        display(cos_O)
+        if L%3 ==0 
+            scatter((1/L)*ones(8),cos_O,color="r")
+            r_L[r_id] = 1/L
+            r_F21[r_id,:] = cos_O
+            r_id+=1
+        elseif L%3 == 1
+            scatter((1/L)*ones(8),cos_O,color="b")
+            b_L[b_id] = 1/L
+            b_F21[b_id,:] = cos_O
+            b_id+=1
+        else
+            scatter((1/L)*ones(8),cos_O,color="g")
+            g_L[g_id] = 1/L
+            g_F21[g_id,:] = cos_O
+            g_id+=1
+        end 
+        sleep(0.01)
+        display(L)
+    end 
+    if L_sep%3==0
+        legend(["L%3=0","L%3=1","L%3=2"])
+    elseif L_sep%3==1
+        legend(["L%3=1","L%3=2","L%3=0"])
+    else
+        legend(["L%3=2","L%3=0","L%3=1"])
+    end 
+    b_data = [b_L,b_F21]
+    r_data = [r_L,r_F21]
+    g_data = [g_L,g_F21]
+    return b_data , g_data , r_data
+end 
+
+function animate_vison_motion(BCs)
+    L1 = BCs[1]
+    for L_sep = 0:(L1)
+        M_max = get_M_for_L_seperated_visons_along_a1_boundary(BCs,L_sep)
+        plot_bond_energies_2D_repeated_cell(M_max,BCs)
+        sleep(0.05)
+    end 
+end 
+
+function plot_GS_energy_for_varying_vison_seperation_along_a1(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    M0 = get_M0(BCs)
+    E0 =-sum(svd(M0).S)
+    for L_sep = 0:(L1)
+        M_max = get_M_for_L_seperated_visons_along_a1_boundary(BCs,L_sep)
+        E = -sum(svd(M_max).S)-E0
+        scatter(L_sep/L1,E,color="b")
+        #plot_bond_energies_2D_repeated_cell(M_max,BCs)
+        sleep(0.05)
+    end 
+    xlabel("L_sep/L1")
+    ylabel("E-E0")
+    title("GS Energy for visons connected by flipped links on the a1 boundary for BCs = [$L1,$L2,$m]")
+end 
+
+# Open Boundary conditions
+
+function plot_GS_energy_for_varying_vison_position_open_BCs(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    M0 = get_M0_open_BCs(BCs)
+    E0 =-sum(svd(M0).S)
+    for L_sep = 0:(L1)
+        M_max = get_M_open_single_vison(BCs,L_sep)
+        E = -sum(svd(M_max).S)-E0
+        scatter(L_sep/L1,E,color="b")
+        #plot_bond_energies_2D_repeated_cell(M_max,BCs)
+        sleep(0.05)
+    end 
+    xlabel("L_sep/L1")
+    ylabel("E-E0")
+    title("GS Energy for varying single vison position BCs = [$L1,$L2]")
+end 
+
+function plot_energy_of_single_vison_open_BCs_vs_BCs(L_max)
+    """
+    Calculates the energy of a single vison compared to fluxless state. Vison is always placed on the centre plaquette with open BCs
+    L-> inf E-E0 -> 0.153
+    """
+    L_data = zeros(L_max-4)
+    E_data = zeros(L_max-4)
+    for L = 5:L_max
+        BCs = [L,L,0]
+        M0 = get_M0_open_BCs(BCs)
+        E0 =-sum(svd(M0).S)
+        M_max = get_M_open_single_vison(BCs,Int(floor(L/2)))
+        E = -sum(svd(M_max).S)-E0
+        E_data[L-4] = E
+        L_data[L-4] = 1/L
+        scatter(1/L,E,color="b")
+        #plot_bond_energies_2D_repeated_cell(M_max,BCs)
+        display(L)
+        sleep(0.05)
+    end 
+    xlabel("1/L")
+    ylabel("E-E0")
+    title("Energy for single vison with open BCs")
+    plot_finite_scaling([L_data,E_data],"b")
+end 
+
+function plot_F21_eigenvalues_vs_vison_seperation_open_BCs(BCs)
+    L1 = BCs[1]
+    for L_sep = 1:(L1)
+        M1 = get_M_open_single_vison(BCs,L_sep)
+        M2 = get_M_open_single_vison(BCs,L_sep-1)
+
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:10]
+        display(cos_O)
+        scatter((L_sep/L1)*ones(1,10),cos_O,color="y")
+        sleep(0.01)
+    end 
+end 
+
+function plot_F21_eigenvalues_single_flipped_bond_open_BCs(L_max)
+    
+    for L = 5:(L_max)
+        BCs = [L,L,0]
+        M1 = get_M0(BCs)
+        M2 = flip_bond_variable(M1,BCs,[Int(floor(L/2)),Int(floor(L/2))],"z")
+        M2 = flip_bond_variable(M2,BCs,[Int(floor(L/2)+1),Int(floor(L/2)-1)],"z")
+
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:15]
+        display(cos_O)
+        scatter((1/L)*ones(1,15),cos_O,color="r")
+        sleep(0.01)
+        display(L)
+    end 
+end 
+
+function plot_F21_eigenvalues_vs_vison_seperation_open_BCs(BCs)
+    L1 = BCs[1]
+    for L_sep = 1:(L1)
+        M1 = get_M_open_single_vison(BCs,L_sep)
+        M2 = get_M_open_single_vison(BCs,L_sep-1)
+
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:10]
+        display(cos_O)
+        scatter((L_sep/L1)*ones(1,10),cos_O,color="y")
+        sleep(0.01)
+    end 
+end 
+
+function  plot_F21_eigenvalues_fixed_vison_seperation_vs_open_BCs(L_sep,L_max)
+    title("F21 eigenvalues for $L_sep -> $(L_sep-1) seperated visons vs open BCs")
+    xlabel("1/L")
+    ylabel("cos(θ)")
+    for L = L_sep+10:(L_max)
+        BCs = [L,L,0]
+        M1 = get_M_open_single_vison(BCs,L_sep)
+        M2 = get_M_open_single_vison(BCs,L_sep-1)
+
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:15]
+        display(cos_O)
+        if L%3 ==0 
+            scatter((1/L)*ones(15),cos_O,color="r")
+        elseif L%3 == 1
+            scatter((1/L)*ones(15),cos_O,color="b")
+        else
+            scatter((1/L)*ones(15),cos_O,color="g")
+        end 
+        sleep(0.1)
+        display(L)
+    end 
+end 
+
+function  plot_F21_eigenvalues_vison_at_center_vs_open_BCs(L_max)
+    title("F21 eigenvalues for a2 seperated visons vs open BCs")
+    xlabel("1/L")
+    ylabel("cos(θ)")
+    for L = 15:(L_max)
+        BCs = [L,L,0]
+        M1 = get_M_open_single_vison(BCs,Int(floor(L/2)))
+        M2 = get_M_open_single_vison(BCs,Int(floor(L/2))+1)
+
+        
+        U1 , V1 = get_U_and_V(M1) 
+        U2 , V2 = get_U_and_V(M2)
+
+        U = U2'*U1
+        V = V2'*V1
+
+        F = U'*V
+
+        cos_O = real.(eigvals(F))[1:15]
+        display(cos_O)
+        if L%3 ==0 
+            scatter((1/L)*ones(15),cos_O,color="r")
+        elseif L%3 == 1
+            scatter((1/L)*ones(15),cos_O,color="b")
+        else
+            scatter((1/L)*ones(15),cos_O,color="g")
+        end 
+        
+        #=
+        E1 = (svd(M1).S)[end-14:end]
+        display(E1)
+        E2 = (svd(M2).S)[end-14:end]
+        scatter((1/L)*ones(15),E1,color="r")
+        scatter((1/L)*ones(15),E2,color="b")
+        =#
+        sleep(0.1)
+        display(L)
+    end 
+end 
+#flipping the boundary with periodic boundary conditions
+
+function plot_GS_energy_per_site_for_flipped_boundary_vs_BCs(L_max,m=0)
+    for L = 5:L_max
+        M0 = get_M0([L,L,m])
+        M = flip_loop_across_a1_boundary([L,L,m])
+        E = -sum(svd(M).S)/L^2
+        E0 = -sum(svd(M0).S)/L^2
+        scatter(L,E,color="r")
+        scatter(L,E0,color="b")
+
+        sleep(0.01)
+    end 
+    xlabel("L")
+    ylabel("GS energy per site")
+    title("GS energy per site vs system size")
+    legend(["unflipped boundary","flipped boundary"])
+end 
+
+function plot_GS_energy_difference_for_flipped_boundary_vs_BCs(L_max,m=0)
+    for L = 3:L_max
+        M0 = get_M0([L,L,m])
+        M = flip_loop_across_a1_boundary([L,L,m])
+        E = -sum(svd(M).S)
+        E0 = -sum(svd(M0).S)
+        scatter(1/(L),E-E0,color="r")
+
+        sleep(0.01)
+    end 
+    xlabel("1/L")
+    ylabel("E-E0")
+    title("Energy difference for flipped vs unflipped a1 boundary for BCs = [L,25,m]")
+    axhline(y=0)
+end
+
+function calculate_GS_energy_difference_for_L_seperated_visons_vs_BCs(L_max,L_sep,m=0)
+    b_energy = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    b_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    b_id=1
+
+    g_energy = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    g_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    g_id=1
+
+    r_energy = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    r_L = zeros(Int(ceil((L_max-L_sep)/3))+1)
+    r_id=1
+
+    for L = (L_sep+2):L_max
+        xlabel("1/L")
+        ylabel("E-E0")
+        title("Energy for visons separated by [-5,$L_sep]")
+        M0 = get_M0([L,L,m])
+        M = get_M_for_L_seperated_visons_along_a1_boundary([L,L,m],L_sep)
+        M = flip_bond_variable(M,[L,L,m],[0,1],"x")
+        M = flip_bond_variable(M,[L,L,m],[0,2],"x")
+        M = flip_bond_variable(M,[L,L,m],[0,3],"x")
+        M = flip_bond_variable(M,[L,L,m],[0,4],"x")
+        M = flip_bond_variable(M,[L,L,m],[0,5],"x")
+        E = -sum(svd(M).S)
+        E0 = -sum(svd(M0).S)
+        if L%3 ==0 
+            scatter(1/L,E-E0,color="r")
+            r_L[r_id] = 1/L
+            r_energy[r_id] = E-E0
+            r_id+=1
+        elseif L%3 == 1
+            scatter(1/L,E-E0,color="b")
+            b_L[b_id] = 1/L
+            b_energy[b_id] = E-E0
+            b_id+=1
+        else
+            scatter(1/L,E-E0,color="g")
+            g_L[g_id] = 1/L
+            g_energy[g_id] = E-E0
+            g_id+=1
+        end 
+
+        sleep(0.01)
+        display(L)
+    end 
+    if L_sep%3==0
+        legend(["L%3=0","L%3=1","L%3=2"])
+    elseif L_sep%3==1
+        legend(["L%3=1","L%3=2","L%3=0"])
+    else
+        legend(["L%3=2","L%3=0","L%3=1"])
+    end 
+    b_data = [b_L,b_energy]
+    r_data = [r_L,r_energy]
+    g_data = [g_L,g_energy]
+    return b_data , g_data , r_data
+end
+
+function plot_F21_finite_scaling(raw_data,col="black")
+    X = raw_data[1]
+    Y1 = raw_data[2][:,1]
+    Y3 = raw_data[2][:,3]
+    plot_finite_scaling([X,Y1],col)
+    plot_finite_scaling([X,Y3],col)
+end 
+
+function plot_finite_scaling(raw_data,col="black")
+    X = raw_data[1][5:end-2]
+    Y = raw_data[2][5:end-2]
+    scatter(X,Y,color=col)
+    #plot_linear_fit([X,Y],col)
+    plot_non_linear_fit([X,Y],col)
+end
+
+# adds functions for finite size scaling with linear regression
+
+function lin_regression(x,y)
+    A = [length(x) sum(x) ; sum(x) sum(x.^2)]
+    b = [sum(y) ; sum(y.*x)]
+
+    c = A\b 
+    return c 
+end 
+
+linfunc(x; slope, intercept) = slope*x .+ intercept
+
+function plot_linear_fit(data,col="black")
+    c = lin_regression(data[1],data[2])
+    X = LinRange(0,0.05,100)
+    Y = linfunc(X;slope=c[2],intercept=c[1])
+    plot(X,Y,color=col)
+end 
+
+function non_linear_objective(u, data)
+    x, y = data
+
+    model = u[1].*(x.^2).+u[2].*x.+u[3]
+
+    residuals = model.-y
+
+    return sum(residuals.^2)
+end 
+
+function plot_non_linear_fit(data,col="black")
+    u0 = [0.5,0.4,0.4]
+    optf = OptimizationFunction(non_linear_objective,Optimization.AutoForwardDiff())
+    prob = OptimizationProblem(optf,u0,data)
+    sol = solve(prob,Newton())
+    u = sol.u
+
+    X_fit = LinRange(0,0.1,100)
+    Y_fit = u[1].*X_fit.^2 .+u[2].*X_fit .+u[3]
+
+    display(u)
+    plot(X_fit,Y_fit,color=col)
+end 
+
+
 # sets default boundary conditions
-L1 = 28
-L2 = 28
+L1 = 50
+L2 = 50
 m = 0
 BCs = [L1,L2,m]
 N=L1*L2
 
 # This section creates two commonly used matrices M0 and Mv
 M0 = get_M0(BCs)
-Mv = flip_bond_variable(M0,BCs,[0,0],"z")
-#M2v = flip_bond_variable(Mv, BCs,[8,8],"y")
-#M3v = flip_bond_variable(M2v, BCs,[6,2],"z")
-#M4v = flip_bond_variable(M3v, BCs,[7,1],"z")
-#M3 = flip_bond_variable(Mv,BCs,[0,0],"y")
-#M3 = flip_bond_variable(M3,BCs,[0,0],"z")
+M0_open = get_M0_open_BCs(BCs)
+Mv_open = flip_bond_variable(M0_open,BCs,[Int(floor(L1/2)),Int(floor(L2/2))],"z")
+Ms_open = get_M_open_single_vison(BCs)
 
-#Mv = flip_bond_variable(M0,BCs,[0,0],"z") # vison pair at [0,0] with z orientation
-M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
+MK1 = flip_bond_variable(M0,BCs,[0,0],"x")
+MK1 = flip_bond_variable(MK1,BCs,[0,1],"y")
+MK2 = flip_bond_variable(M0,BCs,[0,0],"y")
+MK2 = flip_bond_variable(MK2,BCs,[1,0],"x")
+#MK = flip_bond_variable(MK,BCs,[1,1],"x")
+#MK = flip_bond_variable(MK,BCs,[1,2],"y")
+#MK = flip_bond_variable(MK,BCs,[2,2],"x")
+#MK = flip_bond_variable(MK,BCs,[2,3],"y")
+#MK = flip_bond_variable(MK,BCs,[3,3],"x")
+#MK = flip_bond_variable(MK,BCs,[3,4],"y")
+#MK = flip_bond_variable(MK,BCs,[4,4],"x")
+#MK = flip_bond_variable(MK,BCs,[4,5],"y")
+
+Mv = flip_bond_variable(M0,BCs,[0,0],"z")
+
+
+function get_M_for_L_seperated_visons_z_direction(BCs,L)
+    M0 = get_M0(BCs)
+    M = M0
+    for n = 0:(L-1)
+        M = flip_bond_variable(M,BCs,[n,n],"x")
+        M = flip_bond_variable(M,BCs,[n,n+1],"y")
+    end 
+    return M 
+end 
+
+function plot_F21_vs_z_vison_separation(BCs,L_max)
+    for L = 1:L_max
+        M1 = get_M_for_L_seperated_visons_z_direction(BCs,L)
+        #M2 = get_M_for_L_seperated_visons_z_direction(BCs,L-1)
+
+        M2 = flip_bond_variable(M1,BCs,[0,0],"x")
+        M2 = flip_bond_variable(M2,BCs,[0,1],"y")
+
+        U1 ,V1 = get_U_and_V(M1)
+        U2 ,V2 = get_U_and_V(M2)
+
+        U = U1'*U2
+        V = V1'*V2
+
+        F= U*V'
+
+        cmap = get_cmap("Greens")
+
+        #cos_O = eigvals(F)[1:10]
+        #scatter(L*ones(10),cos_O,color="b")
+        Q = eigvecs(F)[:,1]
+        a = V1*Q
+        plot_Majorana_distribution(BCs,real.(a.*exp(-im*angle(a[1]))),"A",gca(),true)
+        gca().set_xlim([-10,10])
+        gca().set_ylim([-10,20])
+        #plot(abs.(Q),color=cmap(L/L_max))
+        sleep(0.5)
+        display(L)
+    end 
+end 
+
 display("")
+
+function get_K_point_mask(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    real_lattice = [n1*a1+n2*a2 for n2=0:(L2-1) for n1=0:(L1-1)] # Note that the order of the loops matters, looping over n1 happens inside loop over n2
+
+    phases = zeros(Complex{Float64},L1*L2)
+    for (id,r) in enumerate(real_lattice)
+        phases[id] = exp(im*dot(g1-g2,r)/3)
+    end 
+    return phases
+end 
+
+function hex_mask_M_open(M)
+    """
+    Eliminates sites from the standard M_open such that the remaining open lattice is close to 6 fold symmetric
+    """
+    N=BCs[1]*BCs[2]
+    for n2 = 0:Int(floor((L2/2)))
+        for n1 = 1:Int(floor((L1/2)))-n2
+            M[n1+L2*n2,:] = 0*M[n1+L2*n2,:]
+        end 
+    end 
+    for n2 = 0:Int(floor((L2/2)))
+        for n1 = 0:(Int(floor(L1/2))-2-n2)
+            display(n2)
+            M[N-L2*n2-n1,:] = 0*M[N-L2*n2-n1,:]
+        end 
+        M[N-L2*n2-(Int(floor(L1/2))-1-n2),N-L2*n2-(Int(floor(L1/2))-1-n2)]=0
+    end 
+    return M 
+end 
+
+#=
+M_hop = flip_bond_variable(M_max,BCs,[0,0],"z")
+
+U_max , V_max = get_U_and_V(M_max)
+U_hop , V_hop = get_U_and_V(M_hop)
+
+F = U_max'*U_hop*V_hop'*V_max
+Q = eigvecs(F)[:,1]
+=#
 
 U0, V0 = get_U_and_V(M0)
 F0 = U0*V0'
 
 M0_bar = M0*F0'
 
+
+UK1 ,VK1 = get_U_and_V(MK1)
+UK2 ,VK2 = get_U_and_V(MK2)
+
 Uv ,Vv = get_U_and_V(Mv)
 Fv = Uv*Vv'
 
 F = (U0'*Uv)*(V0'*Vv)'
+F1 = (U0'*UK1)*(V0'VK1)'
+F2 = (U0'*UK2)*(V0'VK2)'
 
 Q = eigvecs(F)
 z = V0*Q[:,1]
@@ -2104,78 +2959,9 @@ a = sqrt(2)real.(z)
 b = sqrt(2)imag.(z)
 
 O = -0.969
-phi = -angle((F0*z)[1])
+phi = angle(z[1]/(F0*z)[1])
 
-
-q = V0'*z
-
-
-
-Λ1 = -2*(1-cos(O))*(z'*M0'*F0*z-2*real(z[1]*(F0*z)[1])) +4*sin(O)*imag(z[1]*(F0*z)[1])
-display(Λ1)
-Λ2 = (1-cos(O))*(transpose(z)*M0'*F0*z-2*z[1]*(F0*z)[1]) 
-display(Λ2)
-Eq = -2*im*sin(O)*(-z[1]*(F0)[1,:])+2*(1-cos(O))*((M0'*F0)*z-z[1]*(F0)[1,:])+Λ1*z-2*Λ2*conj.(z)
-
-
-Λ = (cos(O)-1)*(2*b'*M0'*F0*a-2(b[1]*(F0*a)[1]+a[1]*(F0*b)[1]))
-Λa = 0.5*(cos(O)-1)*(2*a'*M0'*F0*a-4*a[1]*(F0*a)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
-Λb = 0.5*(cos(O)-1)*(2*b'*M0'*F0*b-4*b[1]*(F0*b)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
-display(Λa)
-display(Λb)
-display(Λa+Λb)
-display(Λ)
-
-Eqa = (1-cos(O))*(2*M0'*F0*a-2*a[1]*F0[1,:]) + 2*sin(O)*(b[1]*F0[1,:]) + Λ*b + 2*Λa*a
-Eqb = (1-cos(O))*(2*M0'*F0*b-2*b[1]*F0[1,:]) - 2*sin(O)*(a[1]*F0[1,:]) + Λ*a + 2*Λb*b 
-
-function vary_z_phase(z0)
-    for θ in LinRange(0,pi,100)
-        z = z0*exp(im*θ)
-        a = sqrt(2)real.(z)
-        b = sqrt(2)imag.(z)
-        Λ = (cos(O)-1)*(2*b'*M0'*F0*a-2(b[1]*(F0*a)[1]+a[1]*(F0*b)[1]))
-        Λa = 0.5*(cos(O)-1)*(2*a'*M0'*F0*a-4*a[1]*(F0*a)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
-        Λb = 0.5*(cos(O)-1)*(2*b'*M0'*F0*b-4*b[1]*(F0*b)[1])-sin(O)*(b[1]*(F0*a)[1]-a[1]*(F0*b)[1])
-
-        scatter(θ,Λ,color="b")
-        scatter(θ,Λa,color="r")
-        scatter(θ,Λb,color="g")
-        scatter(θ,Λa+Λb,color="black")
-        scatter(θ,(F0*a)[1],color="purple")
-    end 
-end 
-
-
-#=
-display(2*Fv[1,1]-2*F0[1,1]) # exact <2|V|2> - <1|V|1>
-display(-2sin(O)*(a[1]*(F0*b)[1]-b[1]*(F0*a)[1])-4*sin(O/2)^2*(a[1]*(F0*a)[1]+b[1]*(F0*b)[1])) # estimate <2|V|2> - <1|V|1>
-display(-2*im*sin(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])-2*(1-cos(O))*(z[1]*(F0*conj(z))[1]+conj(z)[1]*(F0*z)[1]))
-
-display(tr(M0*(F0'-Fv'))) #exact {0^2}H^1{0^2}
-display(2*sin(O/2)^2*(b'*(M0'*F0)*b+a'*(M0'*F0)*a)) #estimate in terms of a and b 
-display(4*sin(O/2)^2*z'*(M0'*F0)*z) # variational estimate in terms of complex z
-=#
-
-
-E2 = -2*im*sin(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])+2*(1-cos(O))*(z'*(M0'*F0)*z-z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])
-
-dE2_dO = -2*im*cos(O)*(z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])+2*(sin(O))*(z'*(M0'*F0)*z-z[1]*(F0*conj(z))[1]-conj(z)[1]*(F0*z)[1])
-
-#Eq = -2*im*sin(O)*(-conj(z)[1]*(F0)[1,:])+2*(1-cos(O))*((M0'*F0)*conj(z)-conj(z)[1]*(F0)[1,:])
-
-
-#display(-atan(2*z[1]^2*sin(phi)/(z'*(M0'*F0)*z-2*z[1]^2*cos(phi))))
-#=
-for θ in LinRange(0,2*pi,15)
-    z_prime = z*exp(-im*θ)
-    b_prime = sqrt(2)imag.(z_prime)
-    plot_Majorana_distribution(BCs,b_prime,"B",gca(),true)
-    sleep(0.01)
-end 
-=#
-
-function Fix_Lambda(Λ,BCs)
+function calculate_F0_exact(r,BCs)
     N = BCs[1]*BCs[2]
     L1 = BCs[1]
     L2 = BCs[2]
@@ -2186,20 +2972,35 @@ function Fix_Lambda(Λ,BCs)
     k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
 
     Sum_term = 0 
-    cos_term = 0
-    for k in k_lattice
+
+    for (id,k) in enumerate(k_lattice)
         D_k ,cos_phi_k = Delta_k(k)
-        cos_term += (cos_phi_k)/(Λ + 4*sin(O/2)^2*D_k)
-        Sum_term += 1/(Λ + 4*sin(O/2)^2*2*D_k)
+        phi_k = angle(1+exp(im*dot(k,a1))+exp(im*dot(k,a2)))
+        Sum_term  += cos(dot(k,r)+phi_k)
     end 
-    return (1/N)*Sum_term
+
+    F0 = Sum_term/N
+    return F0
 end 
 
-#=
-for Λ in LinRange(0,1000,200)
-    func = Fix_Lambda(Λ,BCs)
-    scatter(Λ,func)
-end
-=#
+function plot_F0_real_space(BCs)
+    L1 = 10
+    L2 = 10
+    N = (2*L1+1)*(2*L2+1)
+    real_lattice = [n1*a1+n2*a2 for n1 = -L1:L1 for n2 = -L2:L2]
 
-#(2*(exp(-im*O)-im)*z[1]*F[1,:] + 2(cos(O)-1)*(M0'*F0*z))./z
+    rx_points = zeros(N)
+    ry_points = zeros(N)
+    F0_points = zeros(N)
+
+    cmap = get_cmap("seismic")
+
+    for (id,r) in enumerate(real_lattice)
+        rx_points[id] = r[1]
+        ry_points[id] = r[2]
+        F0_points[id] = calculate_F0_exact(r,BCs)
+    end 
+
+    #scatter3D(rx_points,ry_points,ar_points,color = cmap((8*ar_points./maximum(2*ar_points)).+0.5))
+    scatter(rx_points,ry_points,color = cmap((F0_points./maximum(2*F0_points)).+0.5))
+end
