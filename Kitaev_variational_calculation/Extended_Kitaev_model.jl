@@ -134,6 +134,30 @@ function flip_bond_variable(M,BCs,bond_site,bond_flavour)
     return M_flipped
 end 
 
+function translate_matrix(BCs,translation_vec)
+    L1 = BCs[1]
+    L2 = BCs[2]
+
+    n1 = translation_vec[1]
+    n2 = translation_vec[2]
+
+    P_a1 = zeros(L1,L1)
+    P_a1[2:end,1:(L1-1)] = I(L1-1)
+    P_a1[1,end] = 1
+
+    P_a1 = kron(I(L2),P_a1)
+
+    P_a2 = zeros(L2,L2)
+    P_a2[2:end,1:(L2-1)] = I(L2-1)
+    P_a2[1,end] = 1
+    
+    P_a2 = kron(P_a2,I(L1))
+
+    P = (P_a2)^(n2)*(P_a1)^(n1)
+
+    return P
+end 
+
 function convert_n1_n2_to_site_index(n1n2vec,BCs)
     """
     given a lattice vector in the form [n1,n2] this function converts it to the corresponding site index, accounting for the periodic boundary conditions
@@ -273,6 +297,8 @@ function flip_bond_on_one_layer(M,BCs,bond_site,bond_flavour)
 end 
 
 function get_X_and_Y(BCs)
+    """
+    """
     M0 = get_M0(BCs)
     M1 = flip_bond_variable(M0,BCs,[1,1],"z") # M1 has z link flipped 
     M0 = get_M0(BCs)
@@ -406,24 +432,60 @@ function get_extended_H_tilde(M,BCs,κ)
     return 0.5*(H-H')
 end 
 
-function get_extended_H(M,BCs,κ)
+function get_extended_H(M,BCs,κ,K=1)
     KA, KB = get_KA_KB(M,BCs,κ)
 
-    H = [KA M ; -M' KB]
+    H = [KA K*M ; -K*M' KB]
 
     return 0.5*(H-H')
 end 
 
-function get_TA_TB(M,BCs,κ)
+function get_TA_TB(M,BCs,κ,K=1)
     N = BCs[1]*BCs[2]
-    H = get_extended_H(M,BCs,κ)
+    H = get_extended_H(M,BCs,κ,K)
 
-    T = im*eigvecs(im*H)
+    T = im*eigvecs(Hermitian(im*H))
     T = [conj.(T[:,1:N]) T[:,1:N]]
     TA = T[1:N,1:N]
-    TB = -im*(T[(N+1):2*N,1:N])
+    TB = im*(T[(N+1):2*N,1:N])
 
     return TA , TB
+end 
+
+function get_Energy_matrix_EXT(M,BCs,κ,K=1)
+    N = BCs[1]*BCs[2]
+    H = get_extended_H(M,BCs,κ,K)
+    T = im*eigvecs(Hermitian(im*H))
+    T = [conj.(T[:,1:N]) T[:,1:N]]
+
+    E = diagm(diag(real.((im*T'*H*T))[1:N,1:N]))
+
+    return E 
+end 
+
+function get_X_and_Y_EXT(M1,M2,BCs,κ)
+    """
+    Finds the X^{21} Y^{21} relating two flux sectors in the extended model 
+    η^2       = (X^{21 *} Y^{21 *}) η^1
+    η^{2†}      (Y^{21}   X^{21}  ) η^{1†}
+    """
+    N = BCs[1]*BCs[2]
+
+    H1 = get_extended_H(M1,BCs,κ)
+    H2 = get_extended_H(M2,BCs,κ)
+
+    T1 = im*eigvecs(Hermitian(im*H1))
+    T1 = [conj.(T1[:,1:N]) T1[:,1:N]]
+
+    T2 = im*eigvecs(Hermitian(im*H2))
+    T2 = [conj.(T2[:,1:N]) T2[:,1:N]]
+
+    T = T2'*T1
+
+    X21 = conj.(T[1:N,1:N])
+    Y21 = (T[(N+1):end,1:N])
+
+    return X21 ,Y21
 end 
 
 function find_UA_from_TA(TA)
@@ -460,6 +522,67 @@ function get_RA_IA(T_bar,BCs)
     RB = T_bar[(N+1):2*N,(N+1):2*N]
     IB = -T_bar[(N+1):2*N,1:N]
     return RA , RB, IA ,IB 
+end 
+
+function decompose_G(T_bar)
+    N = Int(size(T_bar)[1]/2)
+
+    G = 0.5*[I(N) im*I(N) ; I(N) -im*I(N)]*T_bar*[I(N) I(N) ; -im*I(N) im*I(N)]
+    A = G[(N+1):end,(N+1):end]
+    B = G[1:N,(N+1):end]
+
+    U = diagm(sqrt.(eigvals(A'*A)))
+    C = eigvecs(A'*A)'
+    D = A*C'*inv(U)
+    V = transpose(D)*B*C'
+    
+    V_prime = V.*round.(abs.(V),digits=14)
+    Phi = kron(I(Int(floor(N/2))),[0 -1 ; 1 0])*V_prime
+    Phi = diag(angle.(Phi))
+    Phi = diagm(exp.(im*Phi/2))
+
+    display(Phi)
+
+    C = Phi*C
+    D = D*inv(Phi)
+    V = round.(((transpose(D)*B*C')),digits=15)
+    return C, D , U, V
+end 
+
+function Bloch_Messiah_decomposition(G)
+    """
+    Peforms a Bloch Messiah decomposition 
+
+    Decomposes a canonical unitary transformation between fermion operators: 
+    ( η2 )   = G (η1)     = (X* Y*)(η1)
+    ( η2†)       (η1†)      (Y  X )(η1†)
+
+    X = DUQ 
+    Y = DV*Q* 
+
+    Z = X^(-1)Y = Q†U^(-1)VQ* 
+    """
+    N = Int(size(G)[1]/2)
+
+    X = G[(N+1):end,(N+1):end] # A=X
+    conj_Y = G[1:N,(N+1):end]  # B=Y*
+
+    U = diagm(sqrt.(eigvals(X'*X)))
+    Q = eigvecs(X'*X)' # C = Q
+    D = X*Q'*inv(U)
+    V = transpose(D)*conj_Y*Q'
+    
+    V_prime = V.*round.(abs.(V),digits=14)
+    Phi = kron(I(Int(floor(N/2))),[0 -1 ; 1 0])*V_prime
+    Phi = diag(angle.(Phi))
+    Phi = diagm(exp.(im*Phi/2))
+
+    display(Phi)
+
+    Q = Phi*Q
+    D = D*inv(Phi)
+    V = round.(((transpose(D)*conj_Y*Q')),digits=15)
+    return Q, D , U, V
 end 
 
 function get_link_indices(BCs)
@@ -598,16 +721,413 @@ function plot_eigenstate_Majorana_wavefunction_EXT(M,BCs,κ,ex_id)
     plot_Majorana_distribution_EXT(BCs,RB[:,end-ex_id+1],maximum(RB[:,end-ex_id+1]),"B",axes[2],true)
 end 
 
+function Heisenberg_hopping_EXT(BCs,κ)
+    M0 = get_M0(BCs)
+    M_0 = flip_bond_variable(M0,BCs,[0,0],"z")
+    M_a1 = flip_bond_variable(M0,BCs,[1,0],"z")
+
+    #X_a1_0 ,Y_a1_0 = get_X_and_Y_EXT(M_0,M_a1,BCs,κ)
+
+    #TA0 , TB0 = get_TA_TB(M0,BCs,κ)
+    
+    TA_0 , TB_0 = get_TA_TB(M_0,BCs,κ)
+
+    #X_0 = transpose(TA_0)*conj.(TA0)+transpose(TB_0)*conj.(TB0)
+    #Y_0 = transpose(TA_0)*(TA0)-transpose(TB_0)*(TB0)
+
+    #display(abs(det(X_0)))
+    #Z_0 = inv(X_0)*Y_0
+
+    P_a1 = translate_matrix(BCs,[1,0])
+
+    TA_a = P_a1*TA_0
+    TB_a = P_a1*TB_0
+
+    #X_a1 = transpose(TA_a1)*conj.(TA0)+transpose(TB_a1)*conj.(TB0)
+    #Y_a1 = transpose(TA_a1)*(TA0)-transpose(TB_a1)*(TB0)
+
+    #display(abs(det(X_a1)))
+
+    #Z_a1 = inv(X_a1)*Y_a1
+
+    #display(det(I(BCs[1]*BCs[2])-conj.(Z_0)*(Z_a1))^(0.5)*abs(det(X_0)))
+
+    X_a_0 = transpose(TA_a)*conj.(TA_0)+transpose(TB_a)*conj.(TB_0)
+    Y_a_0 = transpose(TA_a)*TA_0-transpose(TB_a)*TB_0
+
+
+    Z_a_0 = inv(X_a_0)*Y_a_0
+
+    A_site_hopping = abs(det(X_a_0))^(0.5)
+    display(A_site_hopping)
+
+    B_site_hopping = -2*A_site_hopping*((TA_0*TB_0')[2,1]+(conj.(TB_0)*Z_a_0*TA_0')[1,2])
+    display(B_site_hopping)
+    display(-2*A_site_hopping*((TA_0*TB_0')[2,1]-(conj.(TA_0)*Z_a_0*TB_0')[2,1]))
+    display(-2*A_site_hopping*(((TA_0-(conj.(TA_0)*Z_a_0))*TB_0')[2,1]))
+    display(-2*A_site_hopping*((TA_0*(conj.(X_a_0)-(conj.(Y_a_0)*Z_a_0))*TB_0')[1,1]))
+
+    hop = A_site_hopping + B_site_hopping
+    display(hop)
+    return real.(hop) 
+end 
+
+function plot_Heisenberg_hopping_vs_BCs(κ,L_max = 40)
+    L_start = 5 - 2
+
+    b_hop = zeros(Int(ceil((L_max-L_start)/3)))
+    b_L = zeros(Int(ceil((L_max-L_start)/3)))
+    b_id=1
+
+    g_hop = zeros(Int(ceil((L_max-L_start)/3)))
+    g_L = zeros(Int(ceil((L_max-L_start)/3)))
+    g_id=1
+
+    r_hop = zeros(Int(ceil((L_max-L_start)/3)))
+    r_L = zeros(Int(ceil((L_max-L_start)/3)))
+    r_id=1
+
+    for L = (L_start+2):L_max
+        xlabel("1/L")
+        ylabel(L"T^H/J")
+        title("Heisenberg hopping for κ=$κ|K|")
+
+        hop = Heisenberg_hopping_EXT([L,L,0],κ)
+        
+        if L%3 ==0 
+            scatter(1/L,hop,color="r")
+            r_L[r_id] = 1/L
+            r_hop[r_id] = hop
+            r_id+=1
+        elseif L%3 == 1
+            scatter(1/L,hop,color="b")
+            b_L[b_id] = 1/L
+            b_hop[b_id] = hop
+            b_id+=1
+        else
+            scatter(1/L,hop,color="g")
+            g_L[g_id] = 1/L
+            g_hop[g_id] = hop
+            g_id+=1
+        end 
+
+        sleep(0.01)
+        display(L)
+    end 
+    if L_start%3==0
+        legend(["L%3=0","L%3=1","L%3=2"])
+    elseif L_start%3==1
+        legend(["L%3=1","L%3=2","L%3=0"])
+    else
+        legend(["L%3=2","L%3=0","L%3=1"])
+    end 
+    b_data = [b_L,b_hop]
+    r_data = [r_L,r_hop]
+    g_data = [g_L,g_hop]
+
+    return b_data , g_data , r_data
+end
+
+function plot_finite_scaling(raw_data,col="black")
+    X = raw_data[1][5:end-1]
+    Y = raw_data[2][5:end-1]
+    scatter(X,Y,color=col)
+    #plot_linear_fit([X,Y],col)
+    plot_non_linear_fit([X,Y],col)
+end
+
+# Kitaev Heisenberg model bound states
+
+function get_Tx_Ty_TK_for_Heisenberg_hopping_z_hop_EXT(BCs,J,K,κ)
+    N = BCs[1]*BCs[2]
+
+    M0 = get_M0(BCs)
+
+    M_0 = flip_bond_variable(M0,BCs,[0,0],"z") # M_0 is M^u for a z oriented vison pair at r=0 
+
+    TA_0 , TB_0 = get_TA_TB(M_0,BCs,κ,K-J)
+
+    E_0 = get_Energy_matrix_EXT(M_0,BCs,κ,K-J)
+    E0 = get_Energy_matrix_EXT(M0,BCs,κ,K-J)
+
+    nearest_neighbours = [[1,0],[0,1]]
+    T_list = [zeros(Complex{Float64},N,N),zeros(Complex{Float64},N,N)]
+
+    for (id,a) in enumerate(nearest_neighbours)
+        P_a = translate_matrix(BCs,a)
+
+        TA_a = P_a*TA_0
+        TB_a = P_a*TB_0
+
+        X_a_0 = transpose(TA_a)*conj.(TA_0)+transpose(TB_a)*conj.(TB_0)
+        Y_a_0 = transpose(TA_a)*TA_0-transpose(TB_a)*TB_0
+
+        Z_a_0 = inv(X_a_0)*Y_a_0
+        overlap = abs(det(X_a_0))^(0.5)
+
+        display(overlap)
+
+        A_site_id = convert_n1_n2_to_site_index(a,BCs)
+
+        ηa_η0 = conj.(X_a_0)-conj.(Y_a_0)*Z_a_0
+
+        ηa_ca = sqrt(2)*(ηa_η0*TA_0')[:,A_site_id]
+        c0_η0 = sqrt(2)*(TB_a*ηa_η0)[1,:]
+
+        ηa_c0 = -sqrt(2)*(ηa_η0*TB_0')[1,:]
+        ca_η0 = sqrt(2)*(TA_a*ηa_η0)[A_site_id,:]
+
+        ca_c0 = -2*(TA_a*ηa_η0*TB_0')[A_site_id,1] 
+
+
+        display((overlap)*(1+sign(K)*ca_c0))
+        #display(J*(overlap)*(ηa_η0*(1+sign(K)*ca_c0) + sign(K)*(ηa_ca*c0_η0' - ηa_c0*ca_η0')))
+
+        T_list[id]= J*(overlap)*(ηa_η0*(1+sign(K)*ca_c0) + sign(K)*(ηa_ca*c0_η0' - ηa_c0*ca_η0'))
+    end 
+    
+
+    #Kitaev term 
+    Δ = tr(E0)-tr(E_0)
+    display(Δ)
+    T_Kitaev = Δ*I(N)  + 2*E_0
+
+    return T_list[1], T_list[2] ,T_Kitaev
+end 
+
+function get_k_GtoKtoMtoG(Num_points)
+    """
+    Used to create a list of k vectors along the path G to K to M to G in the Brillouin zone. 
+    Takes:
+    - Num_points which is the number of k vectors to sample along the path
+
+    returns:
+    - a 2xNum_points matrix, where each column is a k vector
+    """
+    
+    # This section is needed to ensure that k points are sampled evenly along the path 
+    Num_points_GtoKtoM = Int(round(Num_points*3/(3+sqrt(3))))
+    Num_points_MtoG = Int(round(Num_points*sqrt(3)/(3+sqrt(3)))) 
+    Num_points = Num_points_GtoKtoM + Num_points_MtoG
+
+    kGtoKtoMtoG = zeros(2,Num_points)
+    [kGtoKtoMtoG[1,i] = g1[1]*i/Num_points_GtoKtoM for i = 1:Num_points_GtoKtoM]
+    [kGtoKtoMtoG[2,Num_points_GtoKtoM+i] = g1[2]*(1-i/Num_points_MtoG) for i = 1:Num_points_MtoG]
+    return(kGtoKtoMtoG)
+end
+
+function get_z_Heisenberg_bandstructure_GtoKtoMtoG_EXT(J,K,κ,Num_k_points)
+    BCs = [20,20,0]
+
+    kGtoKtoMtoG = get_k_GtoKtoMtoG(Num_k_points)
+
+    bands_GtoKtoMtoG = zeros(BCs[1]*BCs[2],Num_k_points)
+
+    Tx ,Ty ,TK = get_Tx_Ty_TK_for_Heisenberg_hopping_z_hop_EXT(BCs,J,K,κ)
+    
+    for id = 1:Num_k_points
+        Q = kGtoKtoMtoG[:,id]
+        H_a1 = cos(dot(Q,a1))*(Tx+Tx')+im*sin(dot(Q,a1))*(Tx'-Tx)
+        H_a2 = cos(dot(Q,a2))*(Ty+Ty')+im*sin(dot(Q,a2))*(Ty'-Ty)
+        H = TK + H_a1 + H_a2
+        bands_GtoKtoMtoG[:,id] = eigvals(H)
+    end
+
+    return bands_GtoKtoMtoG
+end
+
+function plot_bands_GtoKtoMtoG(kGtoKtoMtoG,bands_GtoKtoMtoG,axes)
+    """
+    An alternative way to plot the bandstructure (Faster than plot_bands_G_to_K_to_M_to_G) that takes:
+    - kGtoKtoMtoG a prepared list of k vectors along the path G to K to M to G as a 2xN matrix where N is the number of k vectors sampled along the path
+    - bands_GtoKtoMtoG a list of energies at the corresponding k vectors as a 16xN matrix
+    - an axis object axes used to add features to the plot such as labels. 
+    """
+    Num_k_points = Int(size(kGtoKtoMtoG)[2])
+
+    K_index = round(2*Num_k_points/(3+sqrt(3)))
+    M_index = round(3*Num_k_points/(3+sqrt(3)))
+    
+    E_max = 2 
+    for i = 1:300
+        axes.plot(1:Num_k_points,bands_GtoKtoMtoG[i,:],color="black")
+    end
+
+    axes.set_xticks([1,K_index,M_index,Num_k_points])
+    axes.set_xticklabels(["\$\\Gamma\$","K","M","\$\\Gamma\$"])
+    axes.set_ylabel("Energy")
+    axes.vlines([1,K_index,M_index,Num_k_points],-(0.1),1.1*E_max,linestyle="dashed")
+    axes.set_ylim([-0.05,E_max])
+end
+
+function one_particle_Heisenberg_hopping_Hamiltonian(Q,BCs,J,K,κ)
+    Tx ,Ty ,TK = get_Tx_Ty_TK_for_Heisenberg_hopping_z_hop_EXT(BCs,J,K,κ)
+
+    H_a1 = cos(dot(Q,a1))*(Tx+Tx')+im*sin(dot(Q,a1))*(Tx'-Tx)
+    H_a2 = cos(dot(Q,a2))*(Ty+Ty')+im*sin(dot(Q,a2))*(Ty'-Ty)
+
+    H_effective = Hermitian(TK + H_a1 + H_a2)
+
+    return H_effective
+end 
+
+
+
+
+
 BCs = [20,20,0]
 N=BCs[1]*BCs[2]
 
 M0 = get_M0(BCs)
-Mv = flip_bond_variable(M0,BCs,[1,1],"y")
+Mv = flip_bond_variable(M0,BCs,[0,0],"z")
 M2v = flip_bond_variable(Mv,BCs,[2,1],"x")
 M_max = get_M_for_max_seperated_visons_along_a2_boundary(BCs)
 
-
 κ = 0.2
+
+# Variational calculation of pair state 
+
+X21 , Y21  = get_X_and_Y_EXT(M0,Mv,BCs,κ)
+
+TA0 ,TB0 = get_TA_TB(M0,BCs,κ)
+TAv, TBv = get_TA_TB(Mv,BCs,κ)
+
+Z21 = inv(X21)*(Y21)
+
+β = (I(N)+Z21'*Z21)^(-0.5)
+
+E0 = get_Energy_matrix_EXT(M0,BCs,κ)
+Ev = get_Energy_matrix_EXT(Mv,BCs,κ)
+
+function find_Q_from_Z(Z)
+    UZ ,VZ = get_U_and_V(Z)
+
+    FZ = ceil.(round.(abs.(UZ'*Z21*conj.(UZ)),digits=2)).*exp.(-im*angle.(UZ'*Z21*conj.(UZ)))
+    Phi = diag(kron(I(Int(floor(N/2))),[0 -1 ; 1 0])*FZ)
+    Phi = diagm(exp.(im*angle.(Phi)))
+
+    Q = UZ*(conj.(Phi.^(0.5)))
+    return Q 
+end
+Q = find_Q_from_Z(Z21)
+
+t1 = real(Q'*Z21*conj.(Q))[1,2]
+O = 2*atan(t1)
+
+b = conj.(Q[:,1])
+a = conj.(Q[:,2])
+
+TA0 , TB0 = get_TA_TB(M0,BCs,κ)
+
+TA_0 , TB_0 = get_TA_TB(Mv, BCs, κ)
+
+X0 = conj.(TA0+TB0)/sqrt(2)
+Y0 = (TA0-TB0)/sqrt(2)
+
+a = a*exp(-im*angle((conj.(X0)*a)[1]))
+b = b*exp(-im*angle((Y0*b)[1]))
+
+U_0 = X0 + conj.(Y0)
+V_0 = X0 - conj.(Y0)
+
+U0 , V0 = get_U_and_V(M0)
+F0 = U0*V0'
+Uv, Vv = get_U_and_V(Mv)
+
+TA = (conj.(U_0)-U_0*Z21)*β/(sqrt(2))
+TB = (conj.(V_0)+V_0*Z21)*β/(sqrt(2))
+
+# Expectation values of H^{u_0}
+E0_0 = -tr(U0'*M0*V0)
+E0_exact =  2*tr(E0*Z21'*Z21*inv(I(BCs[1]*BCs[2])+Z21'*Z21)) 
+
+E0_approx = 2sin(O/2)^2*(a'*E0*a +b'*E0*b)
+
+# Expectation for the onsite potential term: 
+V0_0 = 2*(Uv*Vv')[1,1] 
+V0_exact = 2-4*((conj.(X0)*Z21'+conj.(Y0))*inv(I(N)+Z21*Z21')*(transpose(Y0)+Z21*transpose(X0)))[1,1] 
+
+4*(TA*TB')[1,1]
+
+V0_exact_2 = 2*((conj.(U_0)-U_0*Z21)*inv(I(N)+Z21'*Z21)*(transpose(V_0) + Z21'*V_0'))[1,1]
+
+V0_exact_3 = 2-4*((-(X0)*Z21+(Y0))*inv(I(N)+Z21'*Z21)*(Y0'-Z21'*X0'))[1,1]
+
+V0_approx = 2 - 4*(Y0*Y0')[1,1] -
+            2*sin(O)*((Y0*b)[1]*(conj.(X0)*a)[1]-(Y0*a)[1]*(conj.(X0)*b)[1]) -
+            2*sin(O)*conj((Y0*b)[1]*(conj.(X0)*a)[1]-(Y0*a)[1]*(conj.(X0)*b)[1]) -
+            4*(sin(O/2)^2)*((X0*conj.(a))[1]*(conj.(X0)*a)[1]-(conj.(Y0)*conj.(a))[1]*((Y0)*a)[1]) -
+            4*(sin(O/2)^2)*((X0*conj.(b))[1]*(conj.(X0)*b)[1]-(conj.(Y0)*conj.(b))[1]*(Y0*b)[1])
+
+# Second nearest neighbour hopping 
+# <c_0 c_a1> 
+c0ca1 = ((conj.(U_0)-U_0*Z21)*inv(I(N)+Z21'*Z21)*(transpose(U_0) - Z21'*U_0'))[1,2]
+
+
+function plot_GS_largest_changes(Z21)
+    Q = find_Q_from_Z(Z21)
+    b = conj.(Q[:,1])
+    a = conj.(Q[:,2])
+
+    a = a*exp(-im*angle((conj.(X0)*a)[1]))
+    b = b*exp(-im*angle((Y0*b)[1]))
+
+    Rα = real.(0.5*(conj.(X0)+Y0)*a)
+    Iα = imag.(0.5*(conj.(X0)-Y0)*a)
+
+    Rβ = real.(0.5*(conj.(X0)-Y0)*a)
+    Iβ = -imag.((0.5*(conj.(X0)+Y0)*a))
+
+    max_α = maximum(maximum([Rα,Iα,Rβ,Iβ]))
+    display(max_α)
+
+    Cα_r = real.(0.5*(conj.(X0)+Y0)*a)+imag.(0.5*(conj.(X0)-Y0)*a)
+    Cβ_r = real.(0.5*(conj.(X0)-Y0)*a)-imag.((0.5*(conj.(X0)+Y0)*a))
+
+    fig ,ax = subplots(1,2)
+
+    #plot_Majorana_distribution_EXT(BCs,Rα,max_α,"A",ax[1],true)
+    plot_Majorana_distribution_EXT(BCs,Iα,max_α,"B",ax[1],true)
+
+    plot_Majorana_distribution_EXT(BCs,Rβ,max_α,"B",ax[2],true)
+    plot_Majorana_distribution_EXT(BCs,Iβ,max_α,"A",ax[2],true)
+
+    xmax = 6
+    ymax = 10
+    ax[1].set_xlim([-xmax,xmax])
+    ax[2].set_xlim([-xmax,xmax])
+    ax[1].set_ylim([-ymax,ymax])
+    ax[2].set_ylim([-ymax,ymax])
+
+end
+
+
+# Heisenberg Hopping data
+function plot_Heisenberg_hopping_vs_kappa()
+    Hop_data = [[0.0,0.01,0.05,0.1,0.15,0.2,0.25,0.30]
+    ,[0.0936,0.0970,0.1190,0.1434,0.16286,0.1788,0.1922,0.2038]]
+    plot(Hop_data[1],Hop_data[2])
+end 
+
+
+
+
+#FZ = exp.(im*angle.(FZ)/2)
+#UZ = UZ*FZ
+
+#FZ = VZ'*conj.(UZ)
+#FZ = FZ.*round.(abs.(FZ),digits=1)
+#Phi = kron(I(Int(floor(N/2))),[0 1 ; -1 0])*FZ
+#Phi = diag(angle.(Phi))
+#Phi = diagm(exp.(im*Phi))
+ #=
+SZ = diagm(svd(Z).S)
+
+u1 = UZ[:,1]
+u2 = UZ[:,2]
+=#
+
+#=
 T_bar_v = get_T_bar(Mv,BCs,κ)
 T_bar_0 = get_T_bar(M0,BCs,κ)
 
@@ -625,7 +1145,7 @@ TB0 = (RB0+im*IB0)/sqrt(2)
 TA = (RA+im*IA)/sqrt(2)
 TB = (RB+im*IB)/sqrt(2)
 
-F = real.(V'*U)
+#F = real.(V'*U)
 z = eigvecs(F)[:,1]
 O = angle.(eigvals(F))[1]
 b_bar = sqrt(2)*imag.(z)
@@ -642,7 +1162,7 @@ X = 0.5*(U'+V')
 Y = 0.5*transpose(U-V)
 
 Z = inv(X)*Y
-Z = round.(Z,digits=15)
+#Z = round.(Z,digits=15)
 
 function plot_Z_eigvals_increasing_kappa()
     for κ = LinRange(0,0.1,16)
@@ -681,11 +1201,13 @@ u1 = UZ[:,1]
 u2 = UZ[:,2]
 
 UZ_prime = UZ*(Phi.^(0.5))
-u1_prime = UZ_prime[1,:]
-u2_prime = UZ_prime[2,:]
+u1_prime = UZ_prime[:,1]
+u2_prime = UZ_prime[:,2]
 
 A1 = TA0*u1
 B1 = TB0*u1
+=#
+
 #=
 svd_U = svd(U)
 Uu = svd_U.U
@@ -833,5 +1355,6 @@ end
 UI ,VI = svd_non_zero_block(RA,IA,BCs)
 
 =#
+
 
 display("")
