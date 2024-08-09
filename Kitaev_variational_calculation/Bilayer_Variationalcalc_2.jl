@@ -175,7 +175,6 @@ function get_M_open_single_vison(bcs,chain_length=Int(floor(bcs[1]/2)),chain_n2 
     return M 
 end 
 
-
 function flip_bond_variable(M,BCs,bond_site,bond_flavour)
     """
     Given part of the Hamiltonian M this returns a new M with a reversed sign for the bond variable at site bond_site with orientation bond_flavour  
@@ -632,7 +631,7 @@ function calculate_F(M)
 end 
 
 function calculate_link_energies(F,M,link_indices)
-   link_energy_matrix =  M.*F
+   link_energy_matrix =  -M.*F
 
    link_energies = [link_energy_matrix[link_index[1],link_index[2]] for link_index in link_indices]
 
@@ -651,7 +650,7 @@ function plot_bond_energies_2D(M,BCs)
 
     x_link_indices, y_link_indices, z_link_indices = get_link_indices(BCs)
 
-    link_energy_of_fluxless_system = 0.5250914141631111
+    link_energy_of_fluxless_system = -0.5250914141631111
 
     x_link_energies = calculate_link_energies(F,M,x_link_indices) .- link_energy_of_fluxless_system
     y_link_energies = calculate_link_energies(F,M,y_link_indices) .- link_energy_of_fluxless_system
@@ -671,11 +670,15 @@ function plot_bond_energies_2D(M,BCs)
     ylinecollection = matplotlib.collections.LineCollection(y_links,colors = ycolors,linewidths=2.5)
 
     fig ,ax = subplots()
+    #img = imshow([[-max_energy,max_energy]],cmap)
+    #colorbar(orientation="horizontal",label = "Energy/K")
+    #img.set_visible("False")
+
     ax.add_collection(zlinecollection)
     ax.add_collection(xlinecollection)
     ax.add_collection(ylinecollection)
     ax.autoscale()
-
+    ax.set_axis_off()
 end 
 
 function plot_bond_energies_2D_open_BCs(M,BCs)
@@ -2771,8 +2774,8 @@ function plot_F21_finite_scaling(raw_data,col="black")
 end 
 
 function plot_finite_scaling(raw_data,col="black")
-    X = raw_data[1][5:end-2]
-    Y = raw_data[2][5:end-2]
+    X = raw_data[1][5:end-1]
+    Y = raw_data[2][5:end-1]
     scatter(X,Y,color=col)
     #plot_linear_fit([X,Y],col)
     plot_non_linear_fit([X,Y],col)
@@ -2823,8 +2826,8 @@ end
 
 
 # sets default boundary conditions
-L1 = 50
-L2 = 50
+L1 = 46
+L2 = 46
 m = 0
 BCs = [L1,L2,m]
 N=L1*L2
@@ -2926,6 +2929,28 @@ function hex_mask_M_open(M)
     return M 
 end 
 
+function get_Mk(BCs)
+    L1 = BCs[1]
+    L2 = BCs[2]
+
+    d = zeros(L1*L2)
+
+    M0 = get_M0(BCs)
+    k = [0,0]
+    for n1 = 0:(L1-1)
+        for n2 = 0:(L2-1)
+            r = n1*a1+n2*a2
+            id = convert_n1_n2_to_site_index([n1,n2],BCs)
+            d[id] = cos(dot(k,r))/(L1*L2)
+        end 
+    end 
+
+    Mk = M0 - diagm(d)
+
+    return Mk
+end 
+
+
 #=
 M_hop = flip_bond_variable(M_max,BCs,[0,0],"z")
 
@@ -2934,7 +2959,7 @@ U_hop , V_hop = get_U_and_V(M_hop)
 
 F = U_max'*U_hop*V_hop'*V_max
 Q = eigvecs(F)[:,1]
-=#
+
 
 U0, V0 = get_U_and_V(M0)
 F0 = U0*V0'
@@ -2960,6 +2985,7 @@ b = sqrt(2)imag.(z)
 
 O = -0.969
 phi = angle(z[1]/(F0*z)[1])
+=#
 
 function calculate_F0_exact(r,BCs)
     N = BCs[1]*BCs[2]
