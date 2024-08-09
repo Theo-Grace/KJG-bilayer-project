@@ -32,6 +32,7 @@ function dual(A1,A2)
     return v1, v2 
 end
 
+g1,g2 = dual(a1,a2)
 # There are two distinct elements in the 2x2 Majorana Greens function
 # G^AA = G^BB 
 # G^AB = -G^BA 
@@ -492,7 +493,7 @@ function get_ImG0f00_ret(Num_points=1000)
     return w_points, ImG0f00
 end 
 
-function Interpolate_ImG0f00_ret(w)
+function Interpolate_ImG0f00_ret(w,ImG0f00_w_points=[-reverse(collect(LinRange(0.01,5.99,1000)));collect(LinRange(0.01,5.99,1000))])
     if abs(w) > 5.97
         Interpolated_ImG0f00 = 0
     else
@@ -509,6 +510,17 @@ function ReG0f00_ret_at_w(w,tol=1e-7)
     ReG0f00,est = quadgk(Integrand,-5.99,5.99,rtol=tol)
     return ReG0f00
 end
+
+function get_ReG0f00_ret(Num_points=1000)
+    ReG0f00= zeros(2*Num_points)
+    for (id,w) = enumerate(LinRange(0.01,5.9999,Num_points))
+        ReG0f00[Num_points+id] = ReG0f00_ret_at_w(w,1e-5)
+        ReG0f00[Num_points+1-id] = ReG0f00_ret_at_w(-w,1e-5)
+        display(id)
+    end
+    w_points = [-reverse(collect(LinRange(0.01,5.99,Num_points)));collect(LinRange(0.01,5.99,Num_points))]
+    return w_points, ReG0f00
+end 
 
 
 function plot_G0f00_ret()
@@ -559,6 +571,74 @@ function calculate_on_vison_pair_site_f_fermion_density(BCs)
 
     return onsite_density/(L1*L2)
 end
+
+function calculate_off_site_vison_pair_site_f_density_matrix(BCs,site_n1n2)
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    k_lattice = [(j1/L1)*g1 + (j2/L2 -(m*j1)/(L1*L2))*g2 for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+    r = site_n1n2[1]*a1+site_n1n2[2]*a2
+    display(r)
+    density = 0 
+
+    #Im_w_points, ImG0f00_ret = get_ImG0f00_ret()
+    #Re_w_points, ReG0f00_ret = get_ReG0f00_ret()
+
+    for k in k_lattice
+        abs_Delta_k , cos_phi_k = Delta_k(k)
+        density += 0.5*(1+cos_phi_k)*(cos(dot(k,r)))/(abs(1+4*(Interpolate_func(2*0.99*abs_Delta_k,ReG0f00_ret,Re_w_points)+im*Interpolate_func(2*0.99*abs_Delta_k,ImG0f00_ret,Im_w_points)))^2)
+    end 
+
+    return density/(L1*L2)
+end
+
+function plot_Greens_function_for_f_fermions_off_site(BCs,r_n1_n2=[0,0])
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    k_lattice = [(j1/L1)*g1 + (j2/L2 -(m*j1)/(L1*L2))*g2 for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+    r = r_n1_n2[1]*a1+r_n1_n2[2]*a2
+    display(r)
+    density = 0 
+
+    E = zeros(L1*L2)
+    Im_G_contribution = zeros(L1*L2)
+
+    for (id,k) in enumerate(k_lattice)
+        abs_Delta_k , cos_phi_k = Delta_k(k)
+
+        E[id] = 2*abs_Delta_k
+        Im_G_contribution[id] = pi*0.5*(1+cos_phi_k)*(cos(dot(k,r)))#/(abs(1+4*(Interpolate_func(2*0.99*abs_Delta_k,ReG0f00_ret,Re_w_points)+im*Interpolate_func(2*0.99*abs_Delta_k,ImG0f00_ret,Im_w_points)))^2)
+        density += Im_G_contribution[id]
+    end 
+
+    Num_bins = 100
+  
+    w = reverse(LinRange(0,6,Num_bins))
+
+    Im_G_w = zeros(Num_bins)
+
+    binsize = 6/(Num_bins-1)
+
+    for (bin_index,E_bin) in enumerate(w)
+        display(E_bin)
+        for j = 1:L1*L2 
+            if E[j] > E_bin - binsize/2 && E[j] < E_bin + binsize/2 
+                Im_G_w[bin_index] += Im_G_contribution[j]/(binsize)
+            end
+        end 
+    end 
+
+    Im_G_w[1] = 2*Im_G_w[1]
+    Im_G_w = Im_G_w/(L1*L2)
+    plot(w,Im_G_w)
+    display(density/(L1*L2*pi))
+    #plot(w,Re_G_w)
+end
+
+
 
 function ImG0f0r_ret_at_w(w,n1,n2,tol=1e-7)
     G0f0r_Integrand(theta) = (abs(w)/(8pi))*cos((n1-n2)*theta)*(1+sign(w)*((w^2+4-16*cos(theta)^2)/(4*abs(w))))*(((w^2+4)/8)*cos(theta)^2 - ((w^2-4)/16)^2 -cos(theta)^4)^(-1/2)
@@ -629,4 +709,97 @@ function plot_G0f0r_ret(n1,tol=1e-5)
     #plot(w_points,ReG0f0r)
     #plot(w_points,ImG0f0r,linestyle="dashed")
     plot(w_points,ImGf0r,linestyle="dashed")
+end 
+
+function get_Gf00_complex(w)
+    BCs = [600,600,0]
+    N = BCs[1]*BCs[2]
+    L1 = BCs[1]
+    L2 = BCs[2]
+    m = BCs[3]
+
+    ϵ = 0.015
+
+    hl_lattice = [[j1/L1,(j2/L2 + (m*j1)/(L2*L1))] for j1 = 0:(L1-1) for j2 = 0:(L2-1)]
+
+    k_lattice = [h[1]*g1+h[2]*g2 for h in hl_lattice]
+
+    G_gtr = 0 
+    G_lsr = 0 
+
+    for k in k_lattice 
+        Δk = 1+exp(im*dot(k,a1))+exp(im*dot(k,a2))
+        G_gtr += (0.5*(1+cos(angle(Δk)))/(w-2*abs(Δk)+im*ϵ))/N
+        G_lsr += (0.5*(1-cos(angle(Δk)))/(w+2*abs(Δk)-im*ϵ))/N
+    end 
+
+    G = -(G_gtr+G_lsr)
+    return G
+end 
+
+function plot_G00_real_w(N=100)
+    w_list = LinRange(-8,8,N)
+    G = zeros(Complex{Float64},N)
+
+    cmap = get_cmap("hsv")
+
+    for (id,w) in enumerate(w_list) 
+        G[id] = get_Gf00_complex(w)
+        scatter(w,abs(G[id]),color=cmap((angle(G[id])+pi)/(2*pi)))
+        sleep(0.05)
+    end 
+    Phase_colors = (angle.(G).+pi)/(2*pi)
+    
+    plot(w_list,imag.(G))
+    plot(w_list,real.(G))
+end 
+
+function plot_G00_complex_w(N)
+    Im_w_list = LinRange(-3,3,N)
+    Re_w_list = LinRange(-2,2,N)
+
+    cmap = get_cmap("hsv")
+
+    for Re_w in Re_w_list
+        for Im_w in Im_w_list
+            G = get_Gf00_complex(Re_w+im*Im_w)
+            scatter3D(Re_w,Im_w,abs(G),color=cmap((pi+angle(G))/(2*pi)))
+            sleep(0.05)
+        end 
+    end 
+end 
+
+function plot_V_complex_w(N)
+    Im_w_list = LinRange(-1,1,N)
+    Re_w_list = LinRange(-7,-5,N)
+
+    cmap = get_cmap("hsv")
+
+    for Re_w in Re_w_list
+        for Im_w in Im_w_list
+            G = get_Gf00_complex(Re_w+im*Im_w)
+            V = 1/(1+4*G)
+            scatter3D(Re_w,Im_w,abs(V),color=cmap((pi+angle(V))/(2*pi)))
+            sleep(0.05)
+        end 
+    end 
+end 
+
+function plot_V_real_w(N=100)
+    w_list = LinRange(-8,8,N)
+    V = zeros(Complex{Float64},N)
+
+    cmap = get_cmap("hsv")
+
+    for (id,w) in enumerate(w_list) 
+        G = get_Gf00_complex(w)
+        V[id] = 1/(1+4*G)
+        display(V[id])
+        scatter(w,abs(V[id]),color = cmap((angle(V[id])+pi)/(2*pi)))
+        sleep(0.05)
+    end 
+    
+    plot(w_list,imag.(V))
+    plot(w_list,real.(V))
+    #scatter(w_list,abs.(G),color=cmap(Phase_colors))
 end 
