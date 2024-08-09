@@ -139,9 +139,9 @@ end
 
 # This section is specialised to the monolayer 
 function update_monolayer_mean_fields(Ux_layer_1)
-    new_Ux_1 = zeros(Complex{Float64},4,4)
+    new_Ux_1 = zeros(4,4)
     for k in half_BZ
-        MK = Kitaev_block(Ux_layer_1,k)
+        MK = Kitaev_block_kitaev_rep(Ux_layer_1,k)
         H_K = [zeros(4,4) MK ; MK' zeros(4,4)]
         R, O = diagonalise(H_K)
         all_fields = R*(O)*R'
